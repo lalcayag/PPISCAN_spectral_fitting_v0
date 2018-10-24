@@ -53,7 +53,6 @@ def spectra_peltier(param,args=()):
     c2_f = 2
     c1_n = 1.6
     c2_n = .009
-    
     k_1 = args[0]
     E = lambda c1,c2,l,s,k: .71*c1*l**2*k*s**2/(c2+(k*l)**2)**(4/3)
     F = lambda c1,c2,l,s,k: .71*c1*l*s**2/((c2+(k*l)**2)**(5/6))
@@ -84,7 +83,7 @@ def spectra_error(param,args=()):
     args_theo = args[:-1]
     F_obs = args[-1]
     k_1 = args[-2]
-    param_chi=param[-1]
+    param_chi=6
     param_theo = param[:-2]
     F_theo = spectra_theo(param_theo,args=args_theo)
     #Chi-squared error
