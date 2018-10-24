@@ -34,8 +34,8 @@ from sklearn.neighbors import KDTree
 def LLH(param,args=()):
     #args = (spectra_error,model,noise,k_1,F_obs)
     #print(param[-1],-1*sum(np.log(args[0](param,args=(args[1:])))))
-    plt.plot(args[3],args[1](param[:8],args=(args[3],))+args[2](param[9:11],args=(args[3],)),'-o')
-    plt.plot(args[3],args[-1],'--')
+    plt.plot(args[3]*(2*np.pi),args[1](param[:8],args=(args[3],))+args[2](param[9:11],args=(args[3],)),'-o')
+    plt.plot(args[3]*(2*np.pi),args[-1],'--')
     plt.xscale('log')
     plt.yscale('log')
     return -1*sum(np.log(args[0](param,args=(args[1:]))))
@@ -47,7 +47,6 @@ def spectra_peltier(param,args=()):
     #param = [c1,c2,l,s]
     #args = (k)
     # mixture of free conection and neutral conditions
-    print(param)
     c1_f,c2_f,l_f,s_f, c1_n,c2_n,l_n,s_n= param 
     c1_f = 0.85
     c2_f = 2
@@ -68,6 +67,7 @@ def spectra_noise(param,args=()):
 # In[Noise in spectra]
 def spectra_theo(param,args=()):
     #args = (F_model,F_noise,k)
+    
     k_1 = args[2]
     param_noise = param[-2:]
     param_model = param[:-2]
@@ -83,11 +83,12 @@ def spectra_error(param,args=()):
     args_theo = args[:-1]
     F_obs = args[-1]
     k_1 = args[-2]
-    param_chi=6
+    param_chi=70#param[-1]
     param_theo = param[:-2]
     F_theo = spectra_theo(param_theo,args=args_theo)
     #Chi-squared error
-    F_obs_f = F_obs*k_1**param[-2]
+    print(param_chi)
+    F_obs_f = F_obs*k_1**(-3)#param[-2]
     error = param_chi*F_obs_f/F_theo
     return chi.pdf(error, param_chi) 
     
