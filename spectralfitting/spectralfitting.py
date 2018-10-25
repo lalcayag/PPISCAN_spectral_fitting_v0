@@ -34,7 +34,7 @@ from sklearn.neighbors import KDTree
 def LLH(param,args=()):
     #args = (spectra_error,model,noise,k_1,F_obs)
     #print(param[-1],-1*sum(np.log(args[0](param,args=(args[1:])))))
-    plt.plot(args[3]*(2*np.pi),args[1](param[:8],args=(args[3],))+args[2](param[9:11],args=(args[3],)),'-o')
+    plt.plot(args[3]*(2*np.pi),args[1](param[:10],args=(args[3],))+args[2](param[11:13],args=(args[3],)),'-o')
     plt.plot(args[3]*(2*np.pi),args[-1],'--')
     plt.xscale('log')
     plt.yscale('log')
@@ -47,33 +47,33 @@ def spectra_peltier(param,args=()):
     #param = [c1,c2,l,s]
     #args = (k)
     # mixture of free conection and neutral conditions
-    c1_f,c2_f,l_f,s_f, c1_n,c2_n,l_n,s_n= param 
-    c1_f = 0.85
-    c2_f = 2
-    c1_n = 1.6
-    c2_n = .009
+
+    c1_f,c2_f,l_f,s_f, c1_n,c2_n,l_n,s_n,w,n= param 
+    
     k_1 = args[0]
     E = lambda c1,c2,l,s,k: .71*c1*l**2*k*s**2/(c2+(k*l)**2)**(4/3)
     F = lambda c1,c2,l,s,k: .71*c1*l*s**2/((c2+(k*l)**2)**(5/6))
     E_m = E(c1_f,c2_f,l_f,s_f,k_1)+E(c1_n,c2_n,l_n,s_n,k_1)
     F_m = F(c1_f,c2_f,l_f,s_f,k_1)+F(c1_n,c2_n,l_n,s_n,k_1)
+    H = (np.sin(k_1*(w*np.pi)/np.max(k_1))/(k_1*(w*np.pi)/np.max(k_1)))**n
+    F_m = F_m*H
     return F_m
 
 # In[Theoretical Spectra]
 def spectra_noise(param,args=()):
     #args = (k)
-    return param[0]*args[0]**param[1]
+#    return param[0]*args[0]**param[1]
+    return np.exp(param[0]*args[0]**param[1])
 
 # In[Noise in spectra]
 def spectra_theo(param,args=()):
     #args = (F_model,F_noise,k)
-    
     k_1 = args[2]
     param_noise = param[-2:]
     param_model = param[:-2]
     F_noise = args[1](param_noise,args= (k_1,))
     F_model = args[0](param_model,args= (k_1,))
-    #print(param_model[0])
+
     return (F_noise+F_model)
 
 # In[Error distribution: Chi squared]
@@ -83,13 +83,12 @@ def spectra_error(param,args=()):
     args_theo = args[:-1]
     F_obs = args[-1]
     k_1 = args[-2]
-    param_chi=70#param[-1]
-    param_theo = param[:-2]
+    print(param)
+    param_chi=param[-1]
+    param_theo = param[:-1]
     F_theo = spectra_theo(param_theo,args=args_theo)
     #Chi-squared error
-    print(param_chi)
-    F_obs_f = F_obs*k_1**(-3)#param[-2]
-    error = param_chi*F_obs_f/F_theo
+    error = param_chi*F_obs/F_theo
     return chi.pdf(error, param_chi) 
     
 # In[Spectral fitting]
@@ -98,7 +97,7 @@ def spectra_fitting(F_obs,model,noise,k_1,param_init = [],bounds= []):
 
     if ~(len(param_init)>0):
         # Peltier
-        param_init = [.85,23,500,1, 1.6,.009,200,.3,2,.001,2,2]
+        param_init = [.85,23,2000,5, 1.6,1000,200,.36,2,4,0.001,2,2]
     
     if ~(len(bounds)>0):
         bound = [(0.5,10),(0,10),(500,2000),(0,10), (0,10),(0,2),(100,300),(0,1),(5/6,10),(0,.1),(0,3),(2,10)]
