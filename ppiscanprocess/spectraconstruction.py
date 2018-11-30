@@ -17,8 +17,13 @@ To do:
 # In[Packages used]
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy as sp
 from matplotlib.tri import Triangulation,UniformTriRefiner,CubicTriInterpolator,LinearTriInterpolator,TriFinder,TriAnalyzer
-                           
+
+from matplotlib import ticker    
+import matplotlib.colors as colors
+from mpl_toolkits.axes_grid1 import make_axes_locatable  
+                
 from sklearn.neighbors import KDTree
 
 # In[Autocorrelation for non-structured grid, brute force for non-interpolated wind field]  
@@ -126,7 +131,20 @@ def spatial_autocorr_fft(tri,U,V,N_grid=512,auto=False,transform = False, tree =
     ------
         r_u,r_v  - 2D arrays with autocorrelation function rho(tau,eta) 
                    for U and V, respectively.               
-    """     
+    """   
+#    fig, ax = plt.subplots()
+#    ax.set_aspect('equal')
+#    ax.use_sticky_edges = False
+#    ax.margins(0.07)
+#    mask=TriAnalyzer(tri).get_flat_tri_mask(.05)
+#    trid=Triangulation(tri.x,tri.y,triangles=tri.triangles[~mask])
+#    grid = np.meshgrid(np.linspace(np.min(trid.x),np.max(trid.x),N_grid),np.linspace(np.min(trid.y),np.max(trid.y),N_grid)) 
+#    V_intd= CubicTriInterpolator(trid, V)(grid[0].flatten(),grid[1].flatten()).data
+#    V_intd = np.reshape(V_intd,grid[0].shape)
+#    V_intd[np.isnan(V_intd)] = 0.0
+#    ax.triplot(trid, color='black',lw=.5)
+#    im = ax.contourf(grid[0],grid[1],V_intd,np.linspace(7.369614601135254,22.200645446777344,300),cmap='jet')
+#    fig.colorbar(im)
     if transform:
         U_mean = avetriangles(np.c_[tri.x,tri.y], U, tri)
         V_mean = avetriangles(np.c_[tri.x,tri.y], V, tri)
@@ -154,7 +172,7 @@ def spatial_autocorr_fft(tri,U,V,N_grid=512,auto=False,transform = False, tree =
         
     grid = np.meshgrid(np.linspace(np.min(tri.x),
            np.max(tri.x),N_grid),np.linspace(np.min(tri.y),
-                 np.max(tri.y),N_grid))
+                 np.max(tri.y),N_grid))   
     
     U = U-U_mean
     V = V-V_mean
@@ -178,7 +196,9 @@ def spatial_autocorr_fft(tri,U,V,N_grid=512,auto=False,transform = False, tree =
         V_int= LinearTriInterpolator(tri, V)(grid[0].flatten(),grid[1].flatten()).data 
         U_int = np.reshape(U_int,grid[0].shape)
         V_int = np.reshape(V_int,grid[0].shape)
-                          
+    
+
+               
     #zero padding
     U_int[np.isnan(U_int)] = 0.0
     V_int[np.isnan(V_int)] = 0.0
@@ -202,13 +222,16 @@ def spatial_autocorr_fft(tri,U,V,N_grid=512,auto=False,transform = False, tree =
     fftU  = np.fft.fftshift(fftU)
     fftV  = np.fft.fftshift(fftV) 
     fftUV = fftU*np.conj(fftV) 
-    Suu = 2*(np.abs(fftU)**2)/(n*m*dx*dy)
-    Svv = 2*(np.abs(fftV)**2)/(n*m*dx*dy)
-    Suv = 2*np.real(fftUV)/(n*m*dx*dy)
-    kx = 1/(2*dx)
-    ky = 1/(2*dy)   
-    k1 = kx*np.linspace(-1,1,len(Suu))
-    k2 = ky*np.linspace(-1,1,len(Suu))
+    Suu = 2*(np.abs(fftU)**2)*(dx*dy)/(n*m)
+    Svv = 2*(np.abs(fftV)**2)*(dx*dy)/(n*m)
+    Suv = 2*np.real(fftUV)*(dx*dy)/(n*m)
+#    kx = 1/(2*dx)
+#    ky = 1/(2*dy)   
+#    k1 = kx*np.linspace(-1,1,len(Suu))
+#    k2 = ky*np.linspace(-1,1,len(Suu))
+    
+    k1 = np.fft.fftshift((np.fft.fftfreq(n, d=dx)))
+    k2 = np.fft.fftshift((np.fft.fftfreq(m, d=dy)))
     if auto:
         return(r_u,r_v,r_uv,Suu,Svv,Suv,k1,k2)
     else:
@@ -252,12 +275,13 @@ def spectra_average(S_image,k,bins,angle_bin = 30,stat=False):
         """
         def __init__(self): 
             self.S = None
-            self.std = None
-            self.median = None
-            self.numel = None
-            self.max = None
-            self.min = None
-            self.k = None
+            #self.std = None
+            #self.median = None
+            #self.numel = None
+            #self.max = None
+            #self.min = None
+            #self.k1 = None
+            #self.k2 = None
     
     #---------------------
     # Set up input parameters
@@ -265,60 +289,120 @@ def spectra_average(S_image,k,bins,angle_bin = 30,stat=False):
     S_image = np.array(S_image)
     npix, npiy = S_image.shape       
         
-    k1 = k[0]*np.linspace(-1,1,npix)
-    k2 = k[1]*np.linspace(-1,1,npiy)
+    k1 = k[0]#*np.linspace(-1,1,npix)
+    k2 = k[1]#*np.linspace(-1,1,npiy)
     k1, k2 = np.meshgrid(k1,k2)
     # Polar coordiantes (complex phase space)
     r = np.absolute(k1+1j*k2)
     
     # Ordered 1 dimensinal arrays
-    ind = np.argsort(r.flatten())
+    #ind = np.argsort(r.flatten())
     
-    r_sorted = r.flatten()[ind]
-    Si_sorted = S_image.flatten()[ind]
-    r_log = np.log(r_sorted)
-    decades = len(np.unique(r_log.astype(int)))-1
-    # Total number of bins
+#    r_sorted = r.flatten()[ind]
+#    Si_sorted = S_image.flatten()[ind]
+#    r_log = np.log(r_sorted)
+#    r_log10 = np.log10(r_sorted)
+#    decades = len(np.unique(r_log10.astype(int))) 
+#    bin_tot = decades*bins
+#    r_bin10 = np.linspace(np.min(r_log10.astype(int))-1,np.max(r_log10.astype(int)),bin_tot+1)
+#    mat = np.array([r_log10/rb<1  for rb in r_bin10[1:]])
+#    # bin number array
+#    r_n_bin = np.sum(mat,axis=0)
+#    # Find all pixels that fall within each radial bin.
+#    delta_bin = r_n_bin[1:] - r_n_bin[:-1]
+#    bin_ind = np.where(delta_bin)[0] # location of changes in bin
+#    nr = bin_ind[1:] - bin_ind[:-1]  # number of elements per bin 
+#    r_log = r_n_bin*np.max(r_log)/bin_tot
+#    bin_centers= np.exp(0.5*(r_log[bin_ind[1:]]+r_log[bin_ind[:-1]]))
+#    
+#    # Cumulative sum to 2D spectra to find sum per bin
+#    csSim = np.cumsum(Si_sorted, dtype=float)
+#    tbin = csSim[bin_ind[1:]] - csSim[bin_ind[:-1]]
+#    
+    
+#    r_sorted = r.flatten()#[ind]
+    Si_sorted = S_image.flatten()#[ind]
+#    r_log = np.log(r_sorted)
+    r_log10 = np.log10(r.flatten())
+    decades = len(np.unique(r_log10.astype(int)))
+    
     bin_tot = decades*bins
-    # bin number array
-    r_n_bin = (r_log*bin_tot/np.max(r_log)).astype(int)
+    r_bin10 = np.linspace(np.min(r_log10.astype(int))-1,np.max(r_log10.astype(int)),bin_tot+1)
     
-    # Find all pixels that fall within each radial bin.
-    delta_bin = r_n_bin[1:] - r_n_bin[:-1]
-    bin_ind = np.where(delta_bin)[0] # location of changes in bin
-    nr = bin_ind[1:] - bin_ind[:-1]  # number of elements per bin 
-    r_log = r_n_bin*np.max(r_log)/bin_tot
-    bin_centers= np.exp(0.5*(r_log[bin_ind[1:]]+r_log[bin_ind[:-1]]))
+#    mat = np.array([r_log10/rb<1  for rb in r_bin10[1:]])
+#    
+#    
+#    r_n_bin = np.sum(mat,axis=0)
+#    
+#    # Find all pixels that fall within each radial bin.
+#    delta_bin = r_n_bin[1:] - r_n_bin[:-1]
+#    
+#    bin_ind = np.r_[0,np.where(delta_bin)[0]+1,len(r_n_bin)]# location of changes in bin
+#    nr = bin_ind[1:] - bin_ind[:-1]
+#    bin_ind = np.r_[np.where(delta_bin)[0],len(r_n_bin)-1]
+#    csSim = np.cumsum(Si_sorted, dtype=float)
+#    tbin = np.r_[csSim[bin_ind[0]],csSim[bin_ind[1:]] - csSim[bin_ind[:-1]]]
     
-    # Cumulative sum to 2D spectra to find sum per bin
-    csSim = np.cumsum(Si_sorted, dtype=float)
-    tbin = csSim[bin_ind[1:]] - csSim[bin_ind[:-1]]
+#    bin_centers = np.sqrt(10**r_bin10[r_n_bin[bin_ind]]*10**r_bin10[r_n_bin[bin_ind]+1])
     
-    # Same for angles and orientation
-    k1 = k[0]*np.linspace(-1,1,npix)
-    k2 = k[1]*np.linspace(-1,1,npiy/2)
-    k1, k2 = np.meshgrid(k1,k2)
-    phi = np.angle(k1+1j*k2)
-
-    ind_p = np.argsort(phi.flatten())
+    S_ring = np.zeros(Si_sorted.shape)#tbin/nr
     
-    Si_sorted_p = S_image.flatten()[ind_p]
-    phi_sorted = phi.flatten()[ind_p]
-    phi_int = (phi_sorted*180/np.pi/angle_bin).astype(int)
-    delta_bin = phi_int[1:] - phi_int[:-1]
-    phiind = np.r_[np.where(delta_bin)[0],len(delta_bin)] # location of changes in sector
-    nphi = phiind[1:] - phiind[:-1] 
-    # The other half
-    # Cumulative sum to figure out sums for each radius bin
-    csSim_p = np.cumsum(Si_sorted_p, dtype=float)
-    tbin_p = csSim_p[phiind[1:]] - csSim_p[phiind[:-1]]
+#    rlog10 = r_bin10[r_n_bin[bin_ind]]
+    
+#    for i in range(len(rlog10)-1):
+#        
+#        ind0 = (r_log10>rlog10[i]) & (r_log10<rlog10[i+1])
+#        print(i,tbin[i]/nr[i],np.sum(ind0),rlog10[i],rlog10[i+1])
+#        S_ring[ind0] = tbin[i]/nr[i]
+        
+        
+    for i in range(len(r_bin10)-1):
+        ind0 = (r_log10>r_bin10[i]) & (r_log10<r_bin10[i+1])
+        S_ring[ind0] = np.sum(S_image.flatten()[ind0])/np.sum(ind0)
+    
+#    plt.figure()
+#    plt.plot(10**r_bin10[r_n_bin[bin_ind]],tbin/nr)
+#    plt.xscale('log')    
+#    plt.yscale('log')  
+    
+    
+    
+    
+#    S_ring[ind] = S_ring
+#    plt.figure()
+#    plt.contourf(k1, k2,S_image)
+#    plt.colorbar()
+#    plt.figure()
+#    plt.contourf(k1, k2,np.reshape(S_ring,S_image.shape))
+#    plt.colorbar()
+    
+    
+#    # Same for angles and orientation
+#    k1 = k[0]*np.linspace(-1,1,npix)
+#    k2 = k[1]*np.linspace(-1,1,npiy/2)
+#    k1, k2 = np.meshgrid(k1,k2)
+#    phi = np.angle(k1+1j*k2)
+#
+#    ind_p = np.argsort(phi.flatten())
+#    
+#    Si_sorted_p = S_image.flatten()[ind_p]
+#    phi_sorted = phi.flatten()[ind_p]
+#    phi_int = (phi_sorted*180/np.pi/angle_bin).astype(int)
+#    delta_bin = phi_int[1:] - phi_int[:-1]
+#    phiind = np.r_[np.where(delta_bin)[0],len(delta_bin)] # location of changes in sector
+#    nphi = phiind[1:] - phiind[:-1] 
+#    # The other half
+#    # Cumulative sum to figure out sums for each radius bin
+#    csSim_p = np.cumsum(Si_sorted_p, dtype=float)
+#    tbin_p = csSim_p[phiind[1:]] - csSim_p[phiind[:-1]]
 
     # Initialization of the data
     S_r = Spectra_r()
-    S_r.S = tbin / nr
-    S_r.S_p = tbin_p / nphi
-    S_r.k = bin_centers
-    S_r.phi = 0.5*(phi_int[phiind[1:]]+phi_int[phiind[:-1]])*angle_bin
+    S_r.S = np.reshape(S_ring,S_image.shape)
+#    S_r.S_p = tbin_p / nphi
+#    S_r.k1 = k1
+#    S_r.k2 = k2
+#    S_r.phi = 0.5*(phi_int[phiind[1:]]+phi_int[phiind[:-1]])*angle_bin
     # optional?
     if stat==True:
         S_stat = np.array([[np.std(Si_sorted[r_n_bin==r]), 
@@ -476,8 +560,213 @@ def lanczos_int_sq(grid,tree,U,a=1):
     S = np.sum(lanczos_kernel(d)*U[n],axis=1)
     S = np.reshape(S,grid[0].shape)
     return S
+
+# In[]
+#def spatial_spec_sq(x,y,U,V,transform = False):
+#    
+#    
+#    if transform:
+#        U_mean = np.nanmean(U.flatten())
+#        V_mean = np.nanmean(V.flatten())
+#        # Wind direction
+#        gamma = np.arctan2(V_mean,U_mean)
+#        # Components in matrix of coefficients
+#        S11 = np.cos(gamma)
+#        S12 = np.sin(gamma)
+#        T = np.array([[S11,S12], [-S12,S11]])
+#        vel = np.array(np.c_[U.flatten(),V.flatten()]).T
+#        vel = np.dot(T,vel)
+#        X = np.array(np.c_[x,y]).T
+#        X = np.dot(T,X)   
+#        U_t = np.reshape(vel[0,:],U.shape).T
+#        V_t = np.reshape(vel[1,:],V.shape).T       
+#        U_mean = np.nanmean(U_t.flatten())
+#        V_mean = np.nanmean(V_t.flatten())        
+#        U_t = U_t-U_mean
+#        V_t = V_t-V_mean
+#        x = X[0,:]
+#        y = X[1,:]
+#    else:
+#        U_mean = np.nanmean(U.flatten())
+#        V_mean = np.nanmean(V.flatten())
+#        U_t = U-U_mean
+#        V_t = V-V_mean        
+#    dx = np.min(np.abs(np.diff(x)))
+#    dy = np.min(np.abs(np.diff(y)))
+#    grid = np.meshgrid(x,y)
+#    U_t[np.isnan(U_t)] = 0.0
+#    V_t[np.isnan(V_t)] = 0.0
+#    n = grid[0].shape[0]
+#    m = grid[1].shape[0]
+#    # Spectra
+#    fftU = np.fft.fft2(U_t)
+#    fftV = np.fft.fft2(V_t)
+#    fftU  = np.fft.fftshift(fftU)
+#    fftV  = np.fft.fftshift(fftV) 
+#    fftUV = fftU*np.conj(fftV) 
+#    Suu = 2*(np.abs(fftU)**2)*dx*dy/(n*m)
+#    Svv = 2*(np.abs(fftV)**2)*dx*dy/(n*m) 
+#    Suv = 2*np.real(fftUV)*(dx*dy)/(n*m)
+#    k1 = np.fft.fftshift((np.fft.fftfreq(n, d=dx)))
+#    k2 = np.fft.fftshift((np.fft.fftfreq(m, d=dy)))
+#    print(X.shape,n,m,k1.shape,k2.shape)
+#    Su_u = sp.integrate.simps(Suu,k2,axis=1)[k1>0]
+#    Sv_v = sp.integrate.simps(Svv,k2,axis=1)[k1>0]
+#    Su_v = sp.integrate.simps(Suv,k2,axis=1)[k1>0]
+#    k1 = k1[k1>0]
+#    F = .5*(Su_u + Sv_v)  
+#    
+#    return (k1,Su_u,Sv_v,Su_v,F,x,y)
+# In[]
+
+def spatial_spec_sq(x,y,U,V,transform = False,shrink = False, ring=False,bins=20):
     
-  
+    grid = np.meshgrid(x,y)
+    dx = np.min(np.abs(np.diff(x)))
+    dy = np.min(np.abs(np.diff(y))) 
+    # Shrink and square
+    if shrink:
+        patch = ~np.isnan(U)
+        ind_patch_x = np.sum(patch,axis=1) != 0
+        ind_patch_y = np.sum(patch,axis=0) != 0
+        if np.sum(ind_patch_x) > np.sum(ind_patch_y):
+            ind_patch_y = ind_patch_x
+        elif np.sum(ind_patch_y) > np.sum(ind_patch_x):
+            ind_patch_x = ind_patch_y        
+        n = np.sum(ind_patch_x)
+        m = np.sum(ind_patch_y)          
+        ind_patch_grd = np.meshgrid(ind_patch_y,ind_patch_x)
+        ind_patch_grd = ind_patch_grd[0] & ind_patch_grd[1]
+        U = np.reshape(U[ind_patch_grd],(n,m))
+        V = np.reshape(V[ind_patch_grd],(n,m))
+        grid[0] = np.reshape(grid[0][ind_patch_grd],(n,m))
+        grid[1] = np.reshape(grid[1][ind_patch_grd],(n,m))        
+    else:
+        n = grid[0].shape[0]
+        m = grid[1].shape[0]   
+    k1 = np.fft.fftshift((np.fft.fftfreq(n, d=dx)))
+    k2 = np.fft.fftshift((np.fft.fftfreq(m, d=dy))) 
+    k1, k2 = np.meshgrid(k1,k2)
+    k1p, k2p = k1, k2
+    
+    if transform:
+        U_mean = np.nanmean(U.flatten())
+        V_mean = np.nanmean(V.flatten())
+        # Wind direction
+        gamma = np.arctan2(V_mean,U_mean)
+        # Components in matrix of coefficients
+        S11 = np.cos(gamma)
+        S12 = np.sin(gamma)
+        T = np.array([[S11,S12], [-S12,S11]])
+        
+        K = np.array(np.c_[k1.flatten(),k2.flatten()]).T
+        K = np.dot(T,K) 
+        k1 = np.reshape(K[0,:],k1.shape)
+        k2 = np.reshape(K[1,:],k2.shape)
+    U_mean = np.nanmean(U.flatten())
+    V_mean = np.nanmean(V.flatten())
+    U_t = U-U_mean
+    V_t = V-V_mean
+    
+    U_t[np.isnan(U_t)] = 0.0
+    V_t[np.isnan(V_t)] = 0.0
+    # Spectra
+    fftU = np.fft.fft2(U_t)
+    fftV = np.fft.fft2(V_t)
+    fftU  = np.fft.fftshift(fftU)
+    fftV  = np.fft.fftshift(fftV) 
+    fftUV = fftU*np.conj(fftV) 
+    
+    Suu = 2*(np.abs(fftU)**2)*dx*dy/(n*m)
+    Svv = 2*(np.abs(fftV)**2)*dx*dy/(n*m) 
+    Suv = 2*np.real(fftUV)*(dx*dy)/(n*m)
+    
+    dk = np.min([np.max(k1p.flatten()),np.max(k2p.flatten())])/np.sqrt(2)
+    
+    k1_int = np.linspace(-dk,dk,512)
+    k2_int = k1_int
+    k_int_grd = np.meshgrid(k1_int,k2_int)
+    
+    mask = (k1<dk*1.1) & (k1>-dk*1.1)
+    
+    print(len(k1[mask]),len(k1.flatten()))
+    
+    Suu_int = sp.interpolate.griddata(np.c_[k1[mask],k2[mask]],
+              Suu[mask], (k_int_grd[0].flatten(),k_int_grd[1].flatten()),
+              method='nearest')    
+    Svv_int = sp.interpolate.griddata(np.c_[k1[mask],k2[mask]],
+          Svv[mask], (k_int_grd[0].flatten(),k_int_grd[1].flatten()),
+          method='nearest')    
+    Suv_int = sp.interpolate.griddata(np.c_[k1[mask],k2[mask]],
+          Suv[mask], (k_int_grd[0].flatten(),k_int_grd[1].flatten()),
+          method='nearest')
+    
+    Suu_int = np.reshape(Suu_int,k_int_grd[0].shape)
+    Svv_int = np.reshape(Svv_int,k_int_grd[0].shape)
+    Suv_int = np.reshape(Suv_int,k_int_grd[0].shape)
+    
+#    fig, ax = plt.subplots()
+#    im=ax.contourf(k1_int,k2_int,np.log10(Suu_int),np.linspace(0,7,300),cmap='jet')
+#    ax.set_xlabel('$k_1$', fontsize=18)
+#    ax.set_ylabel('$k_2$', fontsize=18)
+#    ax.set_xlim(-.005,0.005)
+#    ax.set_ylim(-.005,0.005)
+#    divider = make_axes_locatable(ax)
+#    cax = divider.append_axes("right", size="5%", pad=0.05)
+#    cbar = fig.colorbar(im, cax=cax)
+#    cbar.ax.tick_params(labelsize=18)
+#    ax.tick_params(labelsize=18)
+#    cbar.ax.set_ylabel("$\log_{10}{S_{uu}}$", fontsize=18)
+#    ax.text(0.05, 0.95, '(a)', transform=ax.transAxes, fontsize=18,verticalalignment='top')
+    
+    print(2)
+
+
+#    l = np.linspace(15,2*10**5,100)
+#    print(gamma*180/np.pi)
+#    
+#    fig, ax = plt.subplots()
+#    ax.set_aspect('equal') 
+#    ax.contourf(k1,k2,Suu,l,locator=ticker.LogLocator(),cmap='jet')
+#    
+#    fig, ax = plt.subplots()
+#    ax.set_aspect('equal') 
+#    ax.contourf(k1_int,k2_int,Suu_int,l,locator=ticker.LogLocator(),cmap='jet')
+#    
+#    fig, ax = plt.subplots()
+#    ax.set_aspect('equal') 
+#    ax.contourf(k1p,k2p,Suu,l,locator = ticker.LogLocator(),cmap='jet')
+    if ring:
+        Su=spectra_average(Suu_int,(k1_int, k2_int),bins,angle_bin = 30,stat=False)
+        #ku = Su.k        
+        Suu_int = Su.S    
+        Sv=spectra_average(Svv_int,(k1_int, k2_int),bins,angle_bin = 30,stat=False)
+        #kv = Sv.k
+        Svv_int = Sv.S
+        Suv=spectra_average(Suv_int,(k1_int, k2_int),bins,angle_bin = 30,stat=False)
+        #kuv = Suv.k
+        Suv_int = Suv.S
+        #return (ku,kv,kuv,Su_u,Sv_v,Su_v)
+#    else:
+#    fig, ax = plt.subplots()
+#    im=ax.contourf(k1_int,k2_int,np.log10(Suu_int),np.linspace(0,7,300),cmap='jet')
+#    ax.set_xlabel('$k_1$', fontsize=18)
+#    ax.set_ylabel('$k_2$', fontsize=18)
+#    ax.set_xlim(-.005,0.005)
+#    ax.set_ylim(-.005,0.005)
+#    divider = make_axes_locatable(ax)
+#    cax = divider.append_axes("right", size="5%", pad=0.05)
+#    cbar = fig.colorbar(im, cax=cax)
+#    cbar.ax.tick_params(labelsize=18)
+#    ax.tick_params(labelsize=18)
+#    cbar.ax.set_ylabel("$\log_{10}{S_{uu}}$", fontsize=18)
+#    ax.text(0.05, 0.95, '(b)', transform=ax.transAxes, fontsize=18,verticalalignment='top')
+
+    
+    Su_u = sp.integrate.simps(Suu_int,k2_int,axis=1)[k1_int>0]
+    Sv_v = sp.integrate.simps(Svv_int,k2_int,axis=1)[k1_int>0]
+    Su_v = sp.integrate.simps(Suv_int,k2_int,axis=1)[k1_int>0]
+    return (k1_int[k1_int>0],k2_int[k1_int>0],Su_u,Sv_v,Su_v)      
     
     
     

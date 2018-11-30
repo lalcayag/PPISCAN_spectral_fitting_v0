@@ -70,7 +70,7 @@ def df_ws_grad(df):
     #V_LOS difference forward in azimuth
     dvdr3 = df.ws.diff(axis=0)
     dvdr3.loc[df.azim==phi[0]] = np.nan
-    #V_LOS difference backward in range gate
+    #V_LOS difference backward in azimuth
     dvdr4 = df.ws.diff(axis=0,periods=-1)
     dvdr4.loc[df.azim==phi[-1]] = np.nan
     # Average over diferences
@@ -227,12 +227,14 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
                    df_ini.
     """
     # Additional features
+    df = df_ini.copy()
     if 'dvdr' in features:
         df = df_ws_grad(df_ini)
     if 'dvdt' in features:
         df = df_ws_grad(df_ini)
     if 'movmed' in features:
-        df = df_mov_med(df,'ws',10)  
+        df = df_mov_med(df,'ws',10) 
+
     # Initialization of input array of high-dimensional datapoints for DBSCAN
     a,b = df.CNR.values.shape 
     X = np.empty((a*b,len(features)))   
@@ -242,7 +244,7 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
     X = np.empty((sum(ind),len(features)))
     # DBSCAN input filling with data form df
     for i,f in enumerate(features):
-        if (f =='azim') | (f =='scan') :
+        if (f =='elev') | (f =='scan') : # Check elev or azim!!
             X[:,i] = np.array([list(df[f].values),]*b).transpose().flatten()[ind]
         else:
             X[:,i] = df[f].values.flatten()[ind]
@@ -385,7 +387,7 @@ def data_interp_kdtree(df_ini,dt,r=[],phi=[],col_r=[],col_phi=[]):
     Input:
     -----
         df_ini   - Filtered pandas dataframe containing the positional information
-                   (range gate and azimuth angle, optional), line-of-sight wind speed.
+                   (range gate and azimuth angle, optional), line-of-sight wind speed. Index are scans
         
         r        - Numpy array with line-of-sight range gates, if not contained in df.
         
@@ -398,17 +400,27 @@ def data_interp_kdtree(df_ini,dt,r=[],phi=[],col_r=[],col_phi=[]):
         df       - Pandas dataframe with missing data, after filtering, filled through interpolation.
         
     """
-    df = df_ini.copy()
+    print('1')
+    df = df_ini#df_ini.copy()
+    scan0 = df.index[0]
+    #df.set_index('scan')
     # Initialization of the kdtree regressor. The number of neighbours, n_neighbours is set equal to
     # the number of corners and midpoints of a cube.
+    print('2')
     neigh = KNeighborsRegressor(n_neighbors=26,weights='distance',algorithm='auto', leaf_size=30,
                                 n_jobs=1)
     
+    print('3')
     # If df has positional information
+    
     if (len(r)==0) & (len(phi)==0):
-        r = np.unique(df[col_r].values).astype(float)
-        phi = np.unique(df[col_phi].values).astype(float)
         
+        phi = np.pi-np.radians(df.loc[scan0][col_phi].unique())
+        r = np.unique(df.loc[scan0][col_r].values)
+    
+        #r = np.unique(df[col_r].values).astype(float)
+        #phi = np.unique(df[col_phi].values).astype(float)
+    print('4')    
     # Meshgrid in polar coordinates and time.
     rg,phig,tg = np.meshgrid(r,phi,np.array([-dt,0,dt]))
     # Central slice in 3D array
@@ -418,12 +430,13 @@ def data_interp_kdtree(df_ini,dt,r=[],phi=[],col_r=[],col_phi=[]):
     for scan in np.unique(df.index.values):
         print(scan)
         #Initial and final scans are interpolated only in space
-        if (scan == 0) | (scan == np.unique(df.index.values)[-1]):
+        if (scan == scan0) | (scan == np.unique(df.index.values)[-1]):
             rg0,phig0 = np.meshgrid(r,phi)
             rp = np.c_[rg0.flatten(),phig0.flatten()]  
             ws = df.ws.loc[scan].values.flatten()
             ind = np.isnan(ws)
             if sum(ind)>0:
+                print(rp.shape,ind.shape)
                 neigh.fit(rp[~ind,:], ws[~ind])
                 # Kdtree Regression
                 ws[ind] = neigh.predict(rp[ind,:])
@@ -431,11 +444,12 @@ def data_interp_kdtree(df_ini,dt,r=[],phi=[],col_r=[],col_phi=[]):
         # The rest of scans are interpolated in space and time        
         else:
             # 3D array 
+            print(df.ws.loc[scan-1].values.shape,df.ws.loc[scan].values.shape,df.ws.loc[scan+1].values.shape)
             ws = np.dstack((df.ws.loc[scan-1].values, df.ws.loc[scan].values,df.ws.loc[scan+1].values))
             # Temporal "distance"
             temp = ws.flatten()*tg.flatten()
             # Invalid points are just put "far" away
-            temp[np.isnan(temp)] = tg.flatten()[np.isnan(temp)]*10000
+            temp[np.isnan(temp)] = tg.flatten()[np.isnan(temp)]# !!!
             # Points in space and "time" to interpolate
             rpt = np.c_[rg.flatten()*np.cos(phig.flatten()),rg.flatten()*np.cos(phig.flatten()),temp]
             # Non valid V_LOS spotted
@@ -449,210 +463,211 @@ def data_interp_kdtree(df_ini,dt,r=[],phi=[],col_r=[],col_phi=[]):
                 ws[ind_int] = neigh.predict(rpt[ind_int,:])
             ws_f.append(np.reshape(ws,rg.shape)[:,:,1]) 
     # The wind speeds are replaced by the conyinous field...
-    df.ws= pd.DataFrame(data = np.vstack(ws_f), index = df.ws.index, columns = df.ws.columns)     
+    df.ws= pd.DataFrame(data = np.vstack(ws_f), index = df.ws.index, columns = df.ws.columns) 
+    df = df.reset_index()
     return (df) 
 
 # In[Kernel density filter-NOT USED]
         
-def filt_stat(df_ini,col,P,ngrid,g_by,N,bw=0.0,init=0):  
-    """
-
-    
-    Input:
-    -----
-        df_ini     - 
-                   
-
-    Output:
-    ------
-        df_prime - 
-    """
-    
-    df = df_ws_grad(df_ini)
-    
-    var_g,var_g_s,grid_s,grid_shape = kernel_grid(df,ngrid,col)
-    
-    #To speed up calculations, the bandwidth is specified beforehand. 
-    #This is not mandatory.
-    
-    bw = 0.0142 
-    
-    # Definition of scan as index in the Dataframe
-    df=df.set_index(g_by)
-    values = []
-    out = pd.DataFrame()
-    Ztot = []
-    
-    for i in range(init,N):
-        #print(i)
-        if i == init: 
-            Z,var, var_s = kernel_scan(df.loc[i],col,var_g,var_g_s,grid_s,grid_shape,bandwidth=bw)
-            Z_old = Z
-            #bwv = np.array(list(bw.values()))
-            
-        else:
-            Z,var, var_s = kernel_scan(df.loc[i],col,var_g,var_g_s,grid_s,grid_shape, bandwidth=bw, Z_old = Z_old,l = 0.7)
-            Z_old = Z
-        
-        Ztot.append(Z)
-        
-        value = total_pdf(Z,var_g_s,P) 
-        values.append(value)
-        print(i,value)
-        points = grid_s[Z.flatten()>value,:]
-        
-        hull = Delaunay(points,qhull_options = 'QJ')
-        invalid = np.reshape(hull.find_simplex(var_s)<0,df.loc[i,'ws'].values.shape)  
-        #print(len(grid_s),len(points),len(var_s), len(var_s[hull.find_simplex(var_s)<0]))
-        aux = df.loc[i,'ws'].values
-        aux[invalid] = np.nan
-        aux2 = df.loc[i,'ws'] 
-        aux2.iloc[:,:]= aux     
-        out = pd.concat([out,aux2])
-    return(out,values,Ztot)    
-
-     
-def kde_sklearn(x, x_grid, bandwidth=0.2, **kwargs):
-    """Kernel Density Estimation with Scikit-learn"""
-    kde_skl = KernelDensity(bandwidth=bandwidth, **kwargs)
-    kde_skl.fit(x)
-    # score_samples() returns the log-likelihood of the samples
-    log_pdf = kde_skl.score_samples(x_grid)
-    return np.exp(log_pdf)
-
-def kernel_scan(df,col,var_g,var_g_s,grid_s,grid_shape,kernel='gaussian',median = False, bandwidth=0.0, Z_old = 0,l = 0):
-    
-    N = len(df[col[0]].values.flatten())
-    var      = np.empty((N,len(col)))
-    var_s    = np.empty((N,len(col)))
-
-    for c,i in zip(col,range(len(col))):
-        
-        if median:
-            var[:,i] = df[c].sub(df[c].median(axis=1),axis=0).values.flatten()
-        else:
-            if c == 'azim':
-                var[:,i] = np.tile(df[c].values.flatten().transpose(), (1, int(N/len(df[c].values.flatten())))).flatten()
-            else:
-                var[:,i] = df[c].values.flatten()
-          
-        a = 1.0/(max(var_g[:,i])-min(var_g[:,i]))
-        b = min(var_g[:,i])        
-        #print(a,b)
-        # scaling  
-        var_s[:,i] = (var[:,i]-b)*a
-  
-    # bandwidth, cross-validation
-    if bandwidth == 0.0:
-        gridh = GridSearchCV(KernelDensity(kernel=kernel),{'bandwidth': np.linspace(0.01, .05, 20)},cv=150)
-        gridh.fit(var_s)
-        #print(var_s)
-        bandwidth=gridh.best_params_
-        #print(gridh.best_params_)
-        kde = gridh.best_estimator_
-        Z = np.exp(kde.score_samples(grid_s))
-        Z = np.reshape(Z, grid_shape)
-        #rescaling 
-        IC = simps_rec(Z,var_g_s,list(range(var_g.shape[1])))
-        Z = Z/IC
-        #print(IC,simps_rec(Z,var_g,list(range(var_g.shape[1]))))
-        #if not Z_old:
-        #    Z_old = np.zeros(Z.shape)
-        return ((1-l)*Z+l*Z_old,var,var_s,bandwidth)
-    
-    else:
-        Z = kde_sklearn(var_s, grid_s, bandwidth = bandwidth,rtol=1e-1,kernel=kernel,leaf_size=150,algorithm='kd_tree',metric='manhattan')
-        Z = np.reshape(Z, grid_shape)
-        #rescaling 
-        IC = simps_rec(Z,var_g_s,list(range(var_g.shape[1])))
-        #print(IC)
-        Z = Z/IC
-        #if not Z_old:
-        #    Z_old = np.zeros(Z.shape)
-        return ((1-l)*Z+l*Z_old,var,var_s)
-    
-def pdf_marg(Z,axes):
-    f_marg = []
-    F_marg = []
-    CL = []
-    for i in range(axes.shape[1]):
-        ind = list(range(axes.shape[1]))
-        if i > 0:
-            ind = list(range(axes.shape[1]))
-            #print(len(axes),i)
-            ind.insert(0,ind.pop(i))
-        #print(ind)   
-        f_marg.append(simps_rec(Z,axes[:,ind[1:]],ind[1:])) 
-        F_marg.append(sp.integrate.cumtrapz(f_marg[-1],axes[:,ind[0]],initial = 0.0))
-        
-        F_marg[-1] = F_marg[-1]/F_marg[-1][np.argmax(F_marg[-1])]
-        plt.plot(axes[:,ind[0]],F_marg[-1])
-        #F_marg[-1][0]=0.0
-        F_marg_int = sp.interpolate.splrep(F_marg[-1],axes[:,ind[0]], k=3)
-        CL.append(np.array([sp.interpolate.splev(.025, F_marg_int, der=0),sp.interpolate.splev(.975, F_marg_int, der=0)]))
-        
-    return(f_marg,F_marg,CL)
-        
-def simps_rec(Z,axes,naxis):# recursive estimation of integral
-    #print(naxis,len(naxis))
-    if len(naxis)==1:
-        #print(naxis[0])
-        return sp.integrate.simps(Z,axes[:,0],axis=naxis[0])
-    else:
-        #print(naxis[0],naxis[1:])
-        #print(naxis[0],simps_rec(Z,axes[:,1:],naxis[1:]).shape)
-        return sp.integrate.simps(simps_rec(Z,axes[:,1:],naxis[1:]),axes[:,0],axis=naxis[0]) 
-
-
-def kernel_grid(df,ngrid,col,median = False):
-    var_g    = np.empty((ngrid,len(col)))
-    var_g_s    = np.empty((ngrid,len(col)))
-    a = np.empty(len(col))
-    b = np.empty(len(col))
-    
-    for c,i in zip(col,range(len(col))):
-        if median:
-            g_max =df[c].sub(df[c].median(axis=1),axis=0).values.flatten().max()
-            g_min =df[c].sub(df[c].median(axis=1),axis=0).values.flatten().min()
-        else:
-            g_max =df[c].values.flatten().max()
-            g_min =df[c].values.flatten().min()
-        a[i] = 1.0/(g_max-g_min)
-        b[i] = g_min
-        var_g[:,i] = np.linspace(g_min,g_max,ngrid)
-        if i == 0:
-            var_g_s[:,i]      = (var_g[:,i]-b[i])*a[i]
-            h = min(np.diff(var_g_s[:,i]))
-            C = (ngrid-1)*h
-            print(C)
-        else:
-            var_g_s[:,i]    = C*(var_g[:,i]-b[i])*a[i]
-    
-    v_mesh_scaled = np.meshgrid(*var_g_s.T)
-    
-    grid_shape = v_mesh_scaled[0].shape
-    
-    grid_s  = np.array([g.flatten() for g in v_mesh_scaled]).T
-    
-    return (var_g,var_g_s,grid_s,grid_shape)
-        
-def total_pdf(Z,var_g,P):
-    N = 20
-    aux = np.ones(Z.shape)
-    values = np.linspace(0,np.max(Z),N)
-    P_values = np.zeros(values.shape)
-    for value,i in zip(values,range(len(values))):
-
-        aux[Z < value] = 0.0
-
-        P_values[i] = simps_rec(Z*aux,var_g,list(range(var_g.shape[1])))
-        #print(value,simps_rec(Z*aux,var_g,list(range(var_g.shape[1]))))
-        if P_values[i] < P:
-            #print(i,P_values)
-            break
-    f = sp.interpolate.interp1d(P_values[0:i+1], values[0:i+1])
-    #plt.plot(P_values,values)
-    aux = np.ones(Z.shape)
-    aux[Z < f(P)] = 0.0
-
-    return(f(P))
+#def filt_stat(df_ini,col,P,ngrid,g_by,N,bw=0.0,init=0):  
+#    """
+#
+#    
+#    Input:
+#    -----
+#        df_ini     - 
+#                   
+#
+#    Output:
+#    ------
+#        df_prime - 
+#    """
+#    
+#    df = df_ws_grad(df_ini)
+#    
+#    var_g,var_g_s,grid_s,grid_shape = kernel_grid(df,ngrid,col)
+#    
+#    #To speed up calculations, the bandwidth is specified beforehand. 
+#    #This is not mandatory.
+#    
+#    bw = 0.0142 
+#    
+#    # Definition of scan as index in the Dataframe
+#    df=df.set_index(g_by)
+#    values = []
+#    out = pd.DataFrame()
+#    Ztot = []
+#    
+#    for i in range(init,N):
+#        #print(i)
+#        if i == init: 
+#            Z,var, var_s = kernel_scan(df.loc[i],col,var_g,var_g_s,grid_s,grid_shape,bandwidth=bw)
+#            Z_old = Z
+#            #bwv = np.array(list(bw.values()))
+#            
+#        else:
+#            Z,var, var_s = kernel_scan(df.loc[i],col,var_g,var_g_s,grid_s,grid_shape, bandwidth=bw, Z_old = Z_old,l = 0.7)
+#            Z_old = Z
+#        
+#        Ztot.append(Z)
+#        
+#        value = total_pdf(Z,var_g_s,P) 
+#        values.append(value)
+#        print(i,value)
+#        points = grid_s[Z.flatten()>value,:]
+#        
+#        hull = Delaunay(points,qhull_options = 'QJ')
+#        invalid = np.reshape(hull.find_simplex(var_s)<0,df.loc[i,'ws'].values.shape)  
+#        #print(len(grid_s),len(points),len(var_s), len(var_s[hull.find_simplex(var_s)<0]))
+#        aux = df.loc[i,'ws'].values
+#        aux[invalid] = np.nan
+#        aux2 = df.loc[i,'ws'] 
+#        aux2.iloc[:,:]= aux     
+#        out = pd.concat([out,aux2])
+#    return(out,values,Ztot)    
+#
+#     
+#def kde_sklearn(x, x_grid, bandwidth=0.2, **kwargs):
+#    """Kernel Density Estimation with Scikit-learn"""
+#    kde_skl = KernelDensity(bandwidth=bandwidth, **kwargs)
+#    kde_skl.fit(x)
+#    # score_samples() returns the log-likelihood of the samples
+#    log_pdf = kde_skl.score_samples(x_grid)
+#    return np.exp(log_pdf)
+#
+#def kernel_scan(df,col,var_g,var_g_s,grid_s,grid_shape,kernel='gaussian',median = False, bandwidth=0.0, Z_old = 0,l = 0):
+#    
+#    N = len(df[col[0]].values.flatten())
+#    var      = np.empty((N,len(col)))
+#    var_s    = np.empty((N,len(col)))
+#
+#    for c,i in zip(col,range(len(col))):
+#        
+#        if median:
+#            var[:,i] = df[c].sub(df[c].median(axis=1),axis=0).values.flatten()
+#        else:
+#            if c == 'azim':
+#                var[:,i] = np.tile(df[c].values.flatten().transpose(), (1, int(N/len(df[c].values.flatten())))).flatten()
+#            else:
+#                var[:,i] = df[c].values.flatten()
+#          
+#        a = 1.0/(max(var_g[:,i])-min(var_g[:,i]))
+#        b = min(var_g[:,i])        
+#        #print(a,b)
+#        # scaling  
+#        var_s[:,i] = (var[:,i]-b)*a
+#  
+#    # bandwidth, cross-validation
+#    if bandwidth == 0.0:
+#        gridh = GridSearchCV(KernelDensity(kernel=kernel),{'bandwidth': np.linspace(0.01, .05, 20)},cv=150)
+#        gridh.fit(var_s)
+#        #print(var_s)
+#        bandwidth=gridh.best_params_
+#        #print(gridh.best_params_)
+#        kde = gridh.best_estimator_
+#        Z = np.exp(kde.score_samples(grid_s))
+#        Z = np.reshape(Z, grid_shape)
+#        #rescaling 
+#        IC = simps_rec(Z,var_g_s,list(range(var_g.shape[1])))
+#        Z = Z/IC
+#        #print(IC,simps_rec(Z,var_g,list(range(var_g.shape[1]))))
+#        #if not Z_old:
+#        #    Z_old = np.zeros(Z.shape)
+#        return ((1-l)*Z+l*Z_old,var,var_s,bandwidth)
+#    
+#    else:
+#        Z = kde_sklearn(var_s, grid_s, bandwidth = bandwidth,rtol=1e-1,kernel=kernel,leaf_size=150,algorithm='kd_tree',metric='manhattan')
+#        Z = np.reshape(Z, grid_shape)
+#        #rescaling 
+#        IC = simps_rec(Z,var_g_s,list(range(var_g.shape[1])))
+#        #print(IC)
+#        Z = Z/IC
+#        #if not Z_old:
+#        #    Z_old = np.zeros(Z.shape)
+#        return ((1-l)*Z+l*Z_old,var,var_s)
+#    
+#def pdf_marg(Z,axes):
+#    f_marg = []
+#    F_marg = []
+#    CL = []
+#    for i in range(axes.shape[1]):
+#        ind = list(range(axes.shape[1]))
+#        if i > 0:
+#            ind = list(range(axes.shape[1]))
+#            #print(len(axes),i)
+#            ind.insert(0,ind.pop(i))
+#        #print(ind)   
+#        f_marg.append(simps_rec(Z,axes[:,ind[1:]],ind[1:])) 
+#        F_marg.append(sp.integrate.cumtrapz(f_marg[-1],axes[:,ind[0]],initial = 0.0))
+#        
+#        F_marg[-1] = F_marg[-1]/F_marg[-1][np.argmax(F_marg[-1])]
+#        plt.plot(axes[:,ind[0]],F_marg[-1])
+#        #F_marg[-1][0]=0.0
+#        F_marg_int = sp.interpolate.splrep(F_marg[-1],axes[:,ind[0]], k=3)
+#        CL.append(np.array([sp.interpolate.splev(.025, F_marg_int, der=0),sp.interpolate.splev(.975, F_marg_int, der=0)]))
+#        
+#    return(f_marg,F_marg,CL)
+#        
+#def simps_rec(Z,axes,naxis):# recursive estimation of integral
+#    #print(naxis,len(naxis))
+#    if len(naxis)==1:
+#        #print(naxis[0])
+#        return sp.integrate.simps(Z,axes[:,0],axis=naxis[0])
+#    else:
+#        #print(naxis[0],naxis[1:])
+#        #print(naxis[0],simps_rec(Z,axes[:,1:],naxis[1:]).shape)
+#        return sp.integrate.simps(simps_rec(Z,axes[:,1:],naxis[1:]),axes[:,0],axis=naxis[0]) 
+#
+#
+#def kernel_grid(df,ngrid,col,median = False):
+#    var_g    = np.empty((ngrid,len(col)))
+#    var_g_s    = np.empty((ngrid,len(col)))
+#    a = np.empty(len(col))
+#    b = np.empty(len(col))
+#    
+#    for c,i in zip(col,range(len(col))):
+#        if median:
+#            g_max =df[c].sub(df[c].median(axis=1),axis=0).values.flatten().max()
+#            g_min =df[c].sub(df[c].median(axis=1),axis=0).values.flatten().min()
+#        else:
+#            g_max =df[c].values.flatten().max()
+#            g_min =df[c].values.flatten().min()
+#        a[i] = 1.0/(g_max-g_min)
+#        b[i] = g_min
+#        var_g[:,i] = np.linspace(g_min,g_max,ngrid)
+#        if i == 0:
+#            var_g_s[:,i]      = (var_g[:,i]-b[i])*a[i]
+#            h = min(np.diff(var_g_s[:,i]))
+#            C = (ngrid-1)*h
+#            print(C)
+#        else:
+#            var_g_s[:,i]    = C*(var_g[:,i]-b[i])*a[i]
+#    
+#    v_mesh_scaled = np.meshgrid(*var_g_s.T)
+#    
+#    grid_shape = v_mesh_scaled[0].shape
+#    
+#    grid_s  = np.array([g.flatten() for g in v_mesh_scaled]).T
+#    
+#    return (var_g,var_g_s,grid_s,grid_shape)
+#        
+#def total_pdf(Z,var_g,P):
+#    N = 20
+#    aux = np.ones(Z.shape)
+#    values = np.linspace(0,np.max(Z),N)
+#    P_values = np.zeros(values.shape)
+#    for value,i in zip(values,range(len(values))):
+#
+#        aux[Z < value] = 0.0
+#
+#        P_values[i] = simps_rec(Z*aux,var_g,list(range(var_g.shape[1])))
+#        #print(value,simps_rec(Z*aux,var_g,list(range(var_g.shape[1]))))
+#        if P_values[i] < P:
+#            #print(i,P_values)
+#            break
+#    f = sp.interpolate.interp1d(P_values[0:i+1], values[0:i+1])
+#    #plt.plot(P_values,values)
+#    aux = np.ones(Z.shape)
+#    aux[Z < f(P)] = 0.0
+#
+#    return(f(P))

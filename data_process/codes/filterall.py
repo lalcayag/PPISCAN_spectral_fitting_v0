@@ -105,8 +105,6 @@ for counter, file_v in enumerate(filelist_v[-2:],0):
            if i == range(len(times)-1):
               loc = sirocco_w_df.scan == times[i+1]
               mask = pd.concat([mask,data_filt_DBSCAN(sirocco_w_df.loc[loc],feat)])
-    
-        #df_clust.ws = df_clust.ws.mask(mask)
 
         with open('df_mask_clust_s_'+file_v[:14]+'.pkl', 'wb') as clust_200:
              pickle.dump(mask, clust_200)
