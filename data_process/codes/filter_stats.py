@@ -7,6 +7,7 @@ Created on Sun Oct  7 20:31:30 2018
 """
 import numpy as np
 import pandas as pd
+import scipy as sp
 import pickle
 import os
 from subprocess import Popen, PIPE
@@ -17,12 +18,40 @@ import tkinter as tkint
 
 import tkinter.filedialog
 
+import matplotlib.ticker as ticker
+import matplotlib
+matplotlib.rcParams['text.usetex'] = True
+matplotlib.rcParams['text.latex.unicode'] = True
+
+
 import ppiscanprocess.filtering as filt
 import ppiscanprocess.windfieldrec as wr
-import ppiscanprocess.spectralconstruction as spec
+import ppiscanprocess.spectraconstruction as spec
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+from os import listdir
+from os.path import isfile, join
+
+import matplotlib.ticker as ticker
+
+from sklearn.neighbors.kde import KernelDensity
+from sklearn.preprocessing import RobustScaler
+
+
+
+# In[]
+
+class FormatScalarFormatter(matplotlib.ticker.ScalarFormatter):
+    def __init__(self, fformat="%1.1f", offset=True, mathText=True):
+        self.fformat = fformat
+        matplotlib.ticker.ScalarFormatter.__init__(self,useOffset=offset,
+                                                        useMathText=mathText)
+    def _set_format(self, vmin, vmax):
+        self.format = self.fformat
+        if self._useMathText:
+            self.format = '$%s$' % matplotlib.ticker._mathdefault(self.format)
 
 # In[Data loading]
 # To do: it is necessary to link the mask file with the source file
@@ -60,7 +89,55 @@ for f,m in zip(file_df,file_mask):
     mask.mask(mask_CNR,other=False,inplace=True)
     df.ws=df.ws.mask(mask)
     DF.append(df)
+    
+################ Figure for CNR comb #############
+ind_can = (df.scan > 9000) & (df.scan < 9030)
 
+ax = df.loc[ind_can].plot.scatter(x='ws', y='CNR', c='grey', s=20, edgecolor='k')  
+ax.set_xlabel('$V_{LOS}$',fontsize=16) 
+ax.set_ylabel('$CNR$',fontsize=16)  
+ax.plot([-40,40],[-27,-27],c='r',lw=2)
+ax.set_xlim([-35,35])
+ax.tick_params(axis='both', which='major', labelsize=16)
+ax.text(0.05, 0.95, '(a)', transform=ax.transAxes, fontsize=24,
+        verticalalignment='top')
+
+ind_can = (df.scan > 9000) & (df.scan < 9030)
+import mpl_toolkits.mplot3d as mp3d
+from mpl_toolkits.mplot3d import Axes3D
+fig = plt.figure()
+ax = fig.add_subplot(111,projection='3d')
+#ax.plot_surface(ws_plane,r_plane,CNR_plane, color = 'r', alpha = .5, zorder=1)
+#face1 = mp3d.art3d.Poly3DCollection([top], alpha=0.5, linewidth=1)
+#alpha = 0.5
+#face1.set_facecolor((0, 0, 1, alpha))
+#ax.add_collection3d(face1)
+idxcnr = df.loc[ind_can].CNR.values.flatten() >-27
+idxws = (df.loc[ind_can].ws.values.flatten()>-23) & (df.loc[ind_can].ws.values.flatten()<0)
+idxr = (df.loc[ind_can].range_gate.values.flatten()>4000)
+idxwsr = idxws & ~idxcnr & idxr
+colors = np.array(['grey']*len(idxcnr))
+colors[~idxcnr] = 'red'
+colors[idxwsr] = 'blue'
+#
+#ax.scatter(df.loc[ind_can].ws.values.flatten()[~idxcnr], df.loc[ind_can].range_gate.values.flatten()[~idxcnr],
+#           df.loc[ind_can].CNR.values.flatten()[~idxcnr], c = 'red', alpha=0.2, s=20, edgecolor='k',zorder = 1)
+#ax.scatter(df.loc[ind_can].ws.values.flatten()[idxcnr], df.loc[ind_can].range_gate.values.flatten()[idxcnr],
+#           df.loc[ind_can].CNR.values.flatten()[idxcnr], c = 'grey',s=20, edgecolor='k',zorder = 10)   
+
+ax.scatter(df.loc[ind_can].ws.values.flatten(), df.loc[ind_can].range_gate.values.flatten(),
+           df.loc[ind_can].CNR.values.flatten(), c = colors, s=20, edgecolor='k')
+ 
+ax.set_xlabel('$V_{LOS}$',fontsize=16) 
+ax.set_zlabel('$CNR$',fontsize=16)  
+ax.set_ylabel('$Range\:gate$',fontsize=16)  
+ax.set_xlim([-35,35])
+ax.set_ylim([7000,0])
+ax.tick_params(axis='both', which='major', labelsize=14)
+ax.text(10, 10, 250, '(b)', transform=ax.transAxes, fontsize=24,
+        verticalalignment='top')
+ax.grid(False)
+##################################################
        
 phi0w = DF[0].azim.unique()
 phi1w = DF[0].azim.unique()
@@ -72,7 +149,6 @@ r_siw, phi_siw = np.meshgrid(r1w, np.radians(phi1w)) # meshgrid
 
 treew,triw,wvaw,neighvaw,indexvaw,wsiw,neighsiw,indexsiw = wr.grid_over2((r_vaw,
                                                    phi_vaw),(r_siw, phi_siw),d)
-
 fig, ax = plt.subplots()
 ax.set_aspect('equal')
 ax.use_sticky_edges = False
@@ -107,6 +183,7 @@ for scan_n in range(0,98):
     plt.pause(.01)
                
 # In[Histograms]
+    
 from matplotlib import rc
 rc('font',**{'family':'sans-serif','sans-serif':['Alef']})
 ## for Palatino and other serif fonts use:
@@ -117,21 +194,21 @@ df_raw = pd.read_csv(file_df[0],sep=";", header=None)
 df_raw.columns = labels      
 df_raw['scan'] = df_raw.groupby('azim').cumcount()
 df_clust2 = df_raw.copy()
-df_clust2.ws=df_clust2.ws.mask(mask)   
+df_clust2.ws=df_clust2.ws.mask(mask)  
+df_median=filt.data_filt_median(df_raw,lim_m=6,lim_g=100) 
 
 ws_raw = df_raw.ws.values[~((df_raw.CNR>-24)&(df_raw.CNR<-8)).values]
-
 ws_clust2 = df_clust2.ws.values[~((df_raw.CNR>-24)&(df_raw.CNR<-8)).values]
-
+ws_median = df_median.ws.values[~((df_raw.CNR>-24)&(df_raw.CNR<-8)).values]
 ws_raw_g = df_raw.ws.values[((df_raw.CNR>-24)&(df_raw.CNR<-8)).values]
-
 ws_clust2_g = df_clust2.ws.values[((df_raw.CNR>-24)&(df_raw.CNR<-8)).values]
+ws_median_g = df_median.ws.values[((df_raw.CNR>-24)&(df_raw.CNR<-8)).values]
 
-ws_median = ws_median[~np.isnan(ws_median)]
-ws_clust2 = ws_clust2[~np.isnan(ws_clust2)]
-
-ws_median_g = ws_median_g[~np.isnan(ws_median_g)]
-ws_clust2_g = ws_clust2_g[~np.isnan(ws_clust2_g)]
+#ws_median = ws_median[~np.isnan(ws_median)]
+#ws_clust2 = ws_clust2[~np.isnan(ws_clust2)]
+#
+#ws_median_g = ws_median_g[~np.isnan(ws_median_g)]
+#ws_clust2_g = ws_clust2_g[~np.isnan(ws_clust2_g)]
 
 r = df_raw.range_gate.values
 a = (np.ones((r.shape[1],1))*df_raw.azim.values.flatten()).transpose()
@@ -185,11 +262,13 @@ r_siw, phi_siw = np.meshgrid(r1w, np.radians(phi1w)) # meshgrid
 
 mask_median = np.isnan(df_median.ws).values
 
-
 mask_median = (~mask_median.flatten()).astype(int)
 
 df_s_median = pd.DataFrame({'r': r, 'a': a, 'm': mask_median})
 mask_median = []
+
+recovery_median = df_s_median.groupby(['a', 'r'])['m'].agg('sum').values/n
+recovery_median = np.reshape(recovery_median, r_siw.shape) 
 
 f, ax3 = plt.subplot(2, 2, 3)
 im = ax3.contourf(r_siw*np.cos(phi_siw),r_siw*np.sin(phi_siw),np.reshape(recovery_median[2,:],phi_siw.shape),levels=np.linspace(.7,1,100),cmap='jet')
@@ -219,59 +298,68 @@ recovery_median_std = df_ws_median.groupby(['a', 'r'])['m'].agg('std').values
 
 # In[]
 plt.figure()
-i = 1
 
 h_raw,bine,_ = plt.hist(ws_raw.flatten(),bins=30,alpha=0.5,density=den)
-h_med,_,_ = plt.hist(ws_median[i,:].flatten(),bins=bine,alpha=0.5,density=den)
+h_med,_,_ = plt.hist(ws_median.flatten(),bins=bine,alpha=0.5,density=den)
 h_clust,_,_ = plt.hist(ws_clust2.flatten(),bins=bine,alpha=0.5,density=den)
 
 h_raw_g,bine_g,_ = plt.hist(ws_raw_g.flatten(),bins=30,alpha=0.5,density=den)
-h_med_g,_,_ = plt.hist(ws_median_g[i,:].flatten(),bins=bine_g,alpha=0.5,density=den)
+h_med_g,_,_ = plt.hist(ws_median_g.flatten(),bins=bine_g,alpha=0.5,density=den)
 h_clust_g,_,_ = plt.hist(ws_clust2_g.flatten(),bins=bine_g,alpha=0.5,density=den)
 
-f, axs = plt.subplots(2,2)
+
+fmt = FormatScalarFormatter("%.2f")
+
+def fm(x, pos=None):
+    return r'${}$'.format('{:.2f}'.format(x).split('f')[0])
+
+f, axs = plt.subplots(2,2, sharey='row')
 axs=axs.flatten()
 ax1=axs[0];ax2=axs[1];ax3=axs[2];ax4=axs[3]
 
 #plt.step(.5*(bine[1:]+bine[:-1]),h_raw,color='blue',lw=3,label=r'Raw data')
 #ax1 = plt.subplot(2, 2, 1)
-ax1.step(.5*(bine[1:]+bine[:-1]),h_med/h_raw,color='black',lw=3,label=r'Median filter')
-ax1.step(.5*(bine[1:]+bine[:-1]),h_clust/h_raw,color='red',lw=3,label=r'Density based filter')
+ax1.step(.5*(bine[1:]+bine[:-1]),h_med/h_raw,color='black',lw=3,label=r'Median')
+ax1.step(.5*(bine[1:]+bine[:-1]),h_clust/h_raw,color='red',lw=3,label=r'Clustering')
 #plt.yscale('log')
-ax1.set_xlabel(r'$V_{LOS}$')
-ax1.set_ylabel(r'Data recovery fraction')
-ax1.legend(loc=(.7,.7))
+ax1.set_xlabel(r'$V_{LOS}$',fontsize=24)
+ax1.set_ylabel(r'Data recovery fraction',fontsize=24)
+ax1.legend(loc=(.65,.6),fontsize=24)
 ax1.set_xlim(-30,30)
-
-
+ax1.tick_params(labelsize=24)
 
 #plt.step(.5*(bine[1:]+bine[:-1]),h_raw,color='blue',lw=3,label=r'Raw data')
-ax2.step(.5*(bine[1:]+bine[:-1]),h_med_g/h_raw_g,color='black',lw=3,label=r'Median filter')
-ax2.step(.5*(bine[1:]+bine[:-1]),h_clust_g/h_raw_g,color='red',lw=3,label=r'Density based filter')
+ax2.step(.5*(bine[1:]+bine[:-1]),h_med_g/h_raw_g,color='black',lw=3,label=r'Median')
+ax2.step(.5*(bine[1:]+bine[:-1]),h_clust_g/h_raw_g,color='red',lw=3,label=r'Clustering')
 #plt.yscale('log')
-ax2.set_xlabel(r'$V_{LOS}$')
-ax2.set_ylabel(r'Data recovery fraction')
-ax2.legend(loc=(.7,.7))
+ax2.set_xlabel(r'$V_{LOS}$',fontsize=24)
+#ax2.set_ylabel(r'Data recovery fraction',fontsize=18)
+ax2.legend(loc=(.65,.6),fontsize=24)
 ax2.set_xlim(-35,30)
+ax2.tick_params(labelsize=24)
 
 
-im1 = ax3.contourf(r_siw*np.cos(phi_siw),r_siw*np.sin(phi_siw),np.reshape(recovery_median[i,:],phi_siw.shape),levels=np.linspace(.7,1,100),cmap='jet')
+im1 = ax3.contourf(r_siw*np.cos(phi_siw),r_siw*np.sin(phi_siw),np.reshape(recovery_median,phi_siw.shape),levels=np.linspace(.7,1,10),cmap='jet')
 
 #divider1 = make_axes_locatable(ax3)
 #cax1 = divider1.append_axes("right", size="5%", pad=0.05)
 #cbar1 = f.colorbar(im1, cax=cax1)
 #cbar1.ax.set_ylabel("Data recovery fraction")
-ax3.set_ylabel(r'West-East [m]', fontsize=12, weight='bold')
-ax3.set_xlabel(r'North-South [m]', fontsize=12, weight='bold') 
+ax3.set_ylabel(r'West-East [m]', fontsize=24, weight='bold')
+ax3.set_xlabel(r'North-South [m]', fontsize=24, weight='bold') 
+ax3.tick_params(labelsize=24)
     
 #f, ax4 = plt.subplot(2, 2, 4)
-im2 = ax4.contourf(r_siw*np.cos(phi_siw),r_siw*np.sin(phi_siw),np.reshape(recovery_clust,phi_siw.shape),levels=np.linspace(.7,1,100),cmap='jet')
+im2 = ax4.contourf(r_siw*np.cos(phi_siw),r_siw*np.sin(phi_siw),np.reshape(recovery_clust,phi_siw.shape),levels=np.linspace(.7,1,10),cmap='jet')
 divider2 = make_axes_locatable(ax4)
 cax2 = divider2.append_axes("right", size="5%", pad=0.05)
-cbar2 = f.colorbar(im2, cax=cax2)
-cbar1.ax.set_ylabel("Data recovery fraction")
-ax4.set_ylabel(r'West-East [m]', fontsize=12, weight='bold')
-ax4.set_xlabel(r'North-South [m]', fontsize=12, weight='bold') 
+cbar2 = f.colorbar(im2, cax=cax2,format=ticker.FuncFormatter(fm))
+
+cbar2.ax.set_ylabel("Data recovery fraction", fontsize=24)
+cbar2.ax.tick_params(labelsize=24)
+#ax4.set_ylabel(r'West-East [m]', fontsize=18, weight='bold')
+ax4.set_xlabel(r'North-South [m]', fontsize=24, weight='bold') 
+ax4.tick_params(labelsize=24)
 
 
 ax1.text(0.05, 0.95, '(a)', transform=ax1.transAxes, fontsize=24,
@@ -284,186 +372,296 @@ ax4.text(0.05, 0.95, '(d)', transform=ax4.transAxes, fontsize=24,
         verticalalignment='top') 
 
 
-# In[]
-             
-U = []
-V = []
-#dphi200_clust0 = []
-#dphi200_clust1 = []
+# In[Synthetic lidars filtering test]
+############################## 
+##############################    
+# In[Synthetic data loading]
+root = tkint.Tk()
+file_vlos = tkint.filedialog.askopenfilenames(parent=root,title='Choose vlos scans files')
+root.destroy()
 
-for scan_n in range(min(df_sirocco.scan.max(),df_vara.scan.max())):
-    print(scan_n)
-    tot_s = (8910-mask_s[df_sirocco.scan==scan_n].sum().sum())/8910
-    tot_v = (8910-mask_v[df_vara.scan==scan_n].sum().sum())/8910
-    if (tot_s>.3) & (tot_v>.3):
-        print(scan_n)    
-        Lidar_sir = (df_sirocco.ws.loc[df_sirocco.scan==scan_n],phi_siw,wsiw,neighsiw,indexsiw) 
-        Lidar_var = (df_vara.ws.loc[df_vara.scan==scan_n],phi_vaw,wvaw,neighvaw,indexvaw)
-        auxU, auxV= wind_field_rec(Lidar_var, Lidar_sir, treew, triw, d)
-        U.append(auxU) 
-        V.append(auxV)
-    else:
-        U.append([]) 
-        V.append([])
+root = tkint.Tk()
+file_vlos_noise = tkint.filedialog.askopenfilenames(parent=root,title='Choose contaminated vlos scans files')
+root.destroy()
 
-with open('U_'+file_v[:14]+'.pkl', 'wb') as U_clust:
-    pickle.dump(U, U_clust)
+root = tkint.Tk()
+file_in_path = tkint.filedialog.askdirectory(parent=root,title='Choose a sim. Input dir')
+root.destroy()
+
+###############
+# Dataframe creation
+
+r_0 = np.linspace(150,7000,198) # It is 105!!!!!!!!!!!!!!!!!!!!!!!!!
+r_1 = np.linspace(150,7000,198)
+phi_0 = np.linspace(256,344,45)*np.pi/180
+phi_1 = np.linspace(196,284,45)*np.pi/180
+r_0_g, phi_0_g = np.meshgrid(r_0,phi_0)
+r_1_g, phi_1_g = np.meshgrid(r_1,phi_1)
+
+ae = [0.025, 0.05, 0.075]
+L = [125,250,500,750]
+G = [2.5,3.5]
+seed = np.arange(1,10)
+ae,L,G,seed = np.meshgrid(ae,L,G,-seed)
+utot = np.linspace(15,25,5)
+Dir = np.linspace(90,270,5)*np.pi/180
+
+onlyfiles = [f for f in listdir(file_in_path) if isfile(join(file_in_path, f))]
+
+#####CNR#######
+DT = int(600/45)
+scanlist = np.arange(0,df.scan.max(),DT)
+CNR = df.CNR.values
+r = df.range_gate.values
+scan = np.array(list(df.scan.values)*r.shape[1]).transpose()
+azim = np.array(list(df.azim.values)*r.shape[1]).transpose()
+r_unique = r[0,:]
+azim_unique = df.azim.unique()
+range_gate,azim = np.meshgrid(r_unique,azim_unique)
+K_CNR = []
+for r_i in r_unique:
+    print(r_i)
+    K_CNR_t = []
+    for t in scanlist[:-1]:
+        print(t)
+        ind_r = r.flatten() == r_i
+        ind_t = (scan.flatten() >=t) & (scan.flatten() < t+DT)
+        ind_tot = (ind_r) & (ind_t)
+        K_CNR_t.append(sp.stats.gaussian_kde(CNR.flatten()[ind_tot], bw_method='silverman'))
+    K_CNR.append(K_CNR_t)
     
-with open('V_'+file_v[:14]+'.pkl', 'wb') as V_clust:
-    pickle.dump(V, V_clust) 
+for r_i in r_unique:                                 # random scan 
+    t = np.random.randint(scanlist[0],scanlist[-1])
 
-# In[]
+    ind_t = (scan.flatten() >=t) & (scan.flatten() < t+DT)
+    #ind_tot = (ind_r) & (ind_t)
+    x = r.flatten()*np.cos(azim.flatten()*np.pi/180)
+    y = r.flatten()*np.sin(azim.flatten()*np.pi/180)
+    X = np.c_[CNR.flatten()[ind_t],x[ind_t],y[ind_t]]
+    transformer = RobustScaler(quantile_range=(25, 75))
+    transformer.fit(X)
+    X = transformer.transform(X)  
     
-Uint, Vint = data_interp_triang(U_c,V_c,triw.x,triw.y,45)
-
-with open('U_int_'+file_v[:14]+'.pkl', 'wb') as U_200_int:
-    pickle.dump(Uint, U_200_int)
+    from sklearn.model_selection import GridSearchCV
     
-with open('V_int_'+file_v[:14]+'.pkl', 'wb') as V_200_int:
-    pickle.dump(Vint, V_200_int)
- 
-# In[]
-
-with open('U_int_'+file_v[:14]+'.pkl', 'rb') as U_200_int:
-   Uint = pickle.load(U_200_int)
+    bandwidths = 10 ** np.linspace(-2, 0, 20)
     
-with open('V_int_'+file_v[:14]+'.pkl', 'rb') as V_200_int:
-   Vint = pickle.load(V_200_int)
-# In[]
+    grid = GridSearchCV(KernelDensity(kernel='gaussian'),
+                        {'bandwidth': bandwidths},
+                        cv=2)
+    grid.fit(X)
     
-fig, ax = plt.subplots()
-ax.set_aspect('equal')
-# Enforce the margins, and enlarge them to give room for the vectors.
-ax.use_sticky_edges = False
-ax.margins(0.07)
-        
-for i in range(8000,10000):
-    #triw.set_mask(masks2[i])
-    #tri_r.set_mask(masks_r[i])
-    ax.cla()
-    ax.set_aspect('equal')
-    # Enforce the margins, and enlarge them to give room for the vectors.
-    ax.use_sticky_edges = False
-    ax.margins(0.07)
-    plt.title('Scan num. %i' %i)
-    ax.triplot(triw, color='black',lw=.5)
-    U_mean = avetriangles(np.c_[triw.x,triw.y], Uint[i], triw.triangles)
-    V_mean = avetriangles(np.c_[triw.x,triw.y], Vint[i], triw.triangles)
-    
-    im=ax.tricontourf(triw,np.sqrt(Uint[i]**2+Vint[i]**2),levels=np.linspace(10,20,300),cmap='jet')
-    #im=ax.tricontourf(triw,Uint[i]-U_mean,levels=np.linspace(-10,5,300),cmap='jet')
+    kde = KernelDensity(kernel='gaussian', bandwidth=.021)
+    kde.fit(X)
+    samples = kde.sample(n_samples=45*198)
+    samples = transformer.inverse_transform(samples)
+    x_int = r_0_g*np.cos(phi_0_g)
+    y_int = r_0_g*np.sin(phi_0_g)
+    X_int = sp.interpolate.griddata(samples[:,1:],samples[:,0], (x_int.flatten(), y_int.flatten()), method='linear')
 
-    
-    Q = ax.quiver(3000.00,-830.00,V_mean,U_mean,pivot='middle', scale=75, units='width', color='k')
-    circle = plt.Circle((3000.00,-830.00), 450, color='k', fill=False)
-    ax.add_artist(circle)
-    ax.set_ylabel(r'West-East [m]', fontsize=12, weight='bold')
-    ax.set_xlabel(r'North-South [m]', fontsize=12, weight='bold') 
-    
-    if len(fig.axes) > 1: 
-        # if so, then the last axes must be the colorbar.
-        # we get its extent
-        pts = fig.axes[-1].get_position().get_points()
-        # and its label
-        label = fig.axes[-1].get_ylabel()
-        # and then remove the axes
-        fig.axes[-1].remove()
-        # then we draw a new axes a the extents of the old one
-        divider = make_axes_locatable(ax)
-        cax= divider.append_axes("right", size="5%", pad=0.05)
-        cb = fig.colorbar(im, cax=cax)
-        cb.ax.set_ylabel("Wind speed [m/s]")
-        # unfortunately the aspect is different between the initial call to colorbar 
-        #   without cax argument. Try to reset it (but still it's somehow different)
-        #cbar.ax.set_aspect(20)
-    else:
-        fig.colorbar(im)
-    plt.pause(.5)
+im=plt.contourf(x_int, y_int, np.reshape(X_int,r_0_g.shape),cmap='jet')
+plt.colorbar(im)
 
-# In[]
-Su_u = np.zeros((15050,256))
-Sv_v = np.zeros((15050,256))
-Su_v = np.zeros((15050,256))
-k_1 = np.zeros((15050,256))
-k_2 = np.zeros((15050,256))
+with open('K_CNR.pkl', 'wb') as writer:
+    pickle.dump(K_CNR,writer)   
+#####Dataframes
 
-for scan in range(0,15050):
-    print(scan)
-    if len(Uint[scan])>0:
-        Su,Sv,Suv,k1,k2=spatial_autocorr_fft(triw,Vint[scan],Uint[scan],transform = True,N_grid=256,interp='cubic')
-        Su_u[scan,:] = sp.integrate.simps(Su,k2,axis=1)
-        Sv_v[scan,:] = sp.integrate.simps(Sv,k2,axis=1)
-        Su_v[scan,:] = sp.integrate.simps(Suv,k2,axis=1)
-        k_1[scan,:] = k1
-        k_1[scan,:] = k2
+iden_lab = np.array(['azim'])
+labels = iden_lab
+
+vel_lab = np.array(['range_gate','ws','CNR'])
+for i in np.arange(198):
+    labels = np.concatenate((labels,vel_lab))
+df_vlos0 = pd.DataFrame(columns=labels)
+df_vlos0_noise = pd.DataFrame(columns=labels)
+df_vlos1 = pd.DataFrame(columns=labels)
+df_vlos1_noise = pd.DataFrame(columns=labels)
+
+r_unique0 = r_0_g[0,:]
+azim_unique0 = phi_0_g[:,0]*180/np.pi
+r_unique1 = r_1_g[0,:]
+azim_unique1 = phi_1_g[:,0]*180/np.pi
+aux_df = np.zeros((len(azim_unique),len(labels)))
+aux_df_noise = np.zeros((len(azim_unique),len(labels)))
+
+#############CNR
+count=0
+for dir_mean in Dir:
+    for u_mean in utot:
+        for ae_i,L_i,G_i,seed_i in zip(ae.flatten(),L.flatten(),G.flatten(),seed.flatten()):
+            vlos0_file = 'vlos0'+str(u_mean)+str(int(dir_mean*180/np.pi))+str(L_i)+str(G_i)+str(ae_i)+str(seed_i)
+            vlos1_file = 'vlos1'+str(u_mean)+str(int(dir_mean*180/np.pi))+str(L_i)+str(G_i)+str(ae_i)+str(seed_i)
+            vlos0_noise_file = 'noise0_'+vlos0_file
+            vlos1_noise_file = 'noise1_'+vlos1_file
+            if vlos0_file in onlyfiles:                
+                vlos0 = np.reshape(np.fromfile(vlos0_file, dtype=np.float32),r_0_g.shape)
+                vlos0_noise = np.reshape(np.fromfile(vlos0_noise_file, dtype=np.float32),r_0_g.shape)
+                n = 1
+                aux_df[:,0] = azim_unique
+                aux_df_noise[:,0] = azim_unique                   
+                # random scan 
+                t = np.random.randint(scanlist[0],scanlist[-1])
+                ind_t = (scan.flatten() >=t) & (scan.flatten() < t+DT)
+                x = r.flatten()*np.cos(azim.flatten()*np.pi/180)
+                y = r.flatten()*np.sin(azim.flatten()*np.pi/180)
+                X = np.c_[CNR.flatten()[ind_t],x[ind_t],y[ind_t]]
+                transformer = RobustScaler(quantile_range=(25, 75))
+                transformer.fit(X)
+                X = transformer.transform(X)  
+                kde = KernelDensity(kernel='gaussian', bandwidth=.021)
+                kde.fit(X)
+                samples = kde.sample(n_samples=45*198)
+                samples = transformer.inverse_transform(samples)
+                x_int = r_0_g*np.cos(phi_0_g)
+                y_int = r_0_g*np.sin(phi_0_g)
+                X_int = sp.interpolate.griddata(samples[:,1:],samples[:,0], (x_int.flatten(), y_int.flatten()), method='linear')
+                samples_CNR = np.reshape(X_int,r_0_g.shape)                  
+                for i in range(len(r_unique)):
+                    #aux_df[:,n:n+3] = np.c_[r_0_g[:,i],vlos0[:,i],samples_CNR]
+                    aux_df_noise[:,n:n+3] = np.c_[r_0_g[:,i],vlos0_noise[:,i],samples_CNR[:,i]]
+                    n = n+3
+                df_vlos0_noise = pd.concat([df_vlos0_noise, pd.DataFrame(data=aux_df_noise,columns=labels)])
+                #df_vlos0 = pd.concat([df_vlos0, pd.DataFrame(data=aux_df,columns=labels)])
+                count+=1
+                print(count)
+                
+                
+df_vlos0_noise['scan'] = df_vlos0_noise.groupby('azim').cumcount()
 
 
-for scan in range(0,15050): 
-    if len(Uint[scan])>0:       
-        k1,k2 = wavenumber(triw,Vint[scan],Uint[scan],N_grid=256) 
-        k_1[scan,:] = k1
-        k_1[scan,:] = k2
-        C = 1/(4*max(k1)*max(k2))
-        print(scan,C**2)
-        Su_v[scan,:] = Su_v[scan,:]*C**2 
-        
-with open('S_minE_k_1_2.pkl', 'wb') as V_t:
-     pickle.dump((Su_u,Sv_v,Su_v,k_1,k_2),V_t)    
+# Smoothing of CNR
+df_vlos0_noise_med = df_vlos0_noise.copy()
+#median filter in radial direction
+df_vlos0_noise_med.CNR = df_vlos0_noise.CNR.rolling(15,axis=1, min_periods = 1).median()
+#median filter in azimuth direction, not necessary
+#df_vlos0_noise_med.CNR = df_vlos0_noise_med.CNR.rolling(3,axis=0, min_periods = 1).median()
 
-fig1, ax1 = plt.subplots()
-ax1.set_xscale('log')
-ax1.set_yscale('log')
+# Contaminate CNR with noise-like values also!!
 
-for i in range(0,len(Su_u)):
-    ax1.scatter(S1[3],S1[3]*Su_u[i,:],color='black')
-    
-# In[]
+#with open('df_vlos_noise.pkl', 'wb') as writer:
+#    pickle.dump(df_vlos0_noise,writer)
 
-X = RobustScaler(quantile_range=(25, 75)).fit_transform(Su_u)
-tree_X = KDTree(X)
-# first k distance estimation
-d,i = tree_X.query(tree_X.data,k = 5)  
-#k-nearest distance
-d=d[:,-1]
-# log transformation to level-up values and easier identification of "knees"
-# d is an array with k-distances sorted in increasing value.
-d = np.log(np.sort(d))
-# x axis (point label)
-l = np.arange(0,len(d))  
-# Down sampling to speed up calculations
-d_resample = np.array(d[::int(len(d)/400)])
-print(len(d_resample))
-# same with point lables
-l_resample = l[::int(len(d)/400)]
-# Cubic spline of resampled k-distances, lower memory usage and higher calculation speed.
-#spl = UnivariateSpline(l_resample, d_resample,s=0.5)
-std=.001*np.ones_like(d_resample)
-# Changes in slope in the sorted, log transformed, k-distance graph
-t = np.arange(l_resample.shape[0])    
-fx = UnivariateSpline(t, l_resample/(-l_resample[0]+l_resample[-1]), k=4, w=1/std)
-fy = UnivariateSpline(t, d_resample/(-d_resample[0]+d_resample[-1]), k=4, w=1/std)
-x_1prime = fx.derivative(1)(t)
-x_2prime = fx.derivative(2)(t)
-y_1prime = fy.derivative(1)(t)
-y_2prime = fy.derivative(2)(t) 
-kappa = (x_1prime* y_2prime - y_1prime* x_2prime) / np.power(x_1prime**2 + y_1prime**2, 1.5)
-# location of knee (first point with k-distance above 1 std of k-distance mean)
-#ind_kappa = np.argsort(np.abs(kappa-(np.mean(kappa)+1*np.std(kappa)))) 
-ind_kappa, _ = find_peaks(kappa,prominence=1) 
-# Just after half of the graph
-ind_kappa = ind_kappa[ind_kappa>int(.3*len(kappa))]
-# The first knee...
-l1 = l_resample[ind_kappa][0]
-# the corresponding eps distance
-eps0 = np.exp(d[l1])   
-plt.plot(l_resample,d_resample) 
+with open('df_vlos0_noise.pkl', 'rb') as reader:
+    df_vlos0_noise = pickle.load(reader)
 
-clf = DBSCAN(eps=eps0, min_samples=5)
-clf.fit(X)
-# Cluster-core samples and boundary samples identification
-core_samples_mask = np.zeros_like(clf.labels_, dtype=bool)
-core_samples_mask[clf.core_sample_indices_] = True
-# Array with labels identifying the different clusters in the data
-labels = clf.labels_
-# Number of identified clusters (excluding noise)
-n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0) 
+ind_scan = df_vlos0_noise.scan == 50
+
+plt.figure()
+
+plt.contourf(r_0_g*np.cos(phi_0_g),r_0_g*np.sin(phi_0_g), df_vlos0_noise.ws.loc[ind_scan ].values, 30, cmap='jet')
+
+plt.figure()
+
+plt.contourf(r_0_g*np.cos(phi_0_g),r_0_g*np.sin(phi_0_g), df_vlos0_noise.CNR.loc[ind_scan ].values, 30, cmap='jet')
+
+
+dfcopy = df.copy()
+
+dfcopy = fl.df_ws_grad(dfcopy,grad='dvdr')
+
+mask_CNR = ((df.CNR>-24) & (df.CNR<-8))
+
+mask_CNR.columns = mask.columns
+
+mask_tot = mask.copy()
+
+mask_tot.mask(mask_CNR,other=False,inplace=True)
+
+dfcopy.ws=df.ws.mask(mask_tot)
+
+ind_scan = (df.scan >= 10) & (df.scan <= 90)
+
+plt.figure()
+im = plt.contourf(r_0_g*np.cos(phi_0_g),r_0_g*np.sin(phi_0_g), df.ws.loc[ind_scan].values, 30, cmap='jet')
+plt.colorbar(im)
+
+#plt.figure()
+#im = plt.contourf(r_0_g*np.cos(phi_0_g),r_0_g*np.sin(phi_0_g), dfcopy.ws.loc[ind_scan].values, 30, cmap='jet')
+#plt.colorbar(im)
+
+plt.figure()
+im = plt.contourf(r_0_g*np.cos(phi_0_g),r_0_g*np.sin(phi_0_g), df.CNR.loc[ind_scan].values, 30, cmap='jet')
+plt.colorbar(im)
+
+########### Noise CNR
+#########################
+
+noisy_CNR = df.CNR.loc[ind_scan].values.flatten()
+
+noisy_CNR = noisy_CNR[(noisy_CNR<-24)&(noisy_CNR>-40)]
+
+transformer = RobustScaler(quantile_range=(25, 75))
+transformer.fit(noisy_CNR.reshape(-1, 1))
+X = transformer.transform(noisy_CNR.reshape(-1, 1))
+
+from sklearn.model_selection import GridSearchCV
+bandwidths = 10**np.linspace(-2, 0, 20)
+grid = GridSearchCV(KernelDensity(kernel='gaussian'),
+                    {'bandwidth': bandwidths},
+                    cv=2)
+grid.fit(X)
+
+kde_CNR = sp.stats.gaussian_kde(noisy_CNR, bw_method='silverman')
+CNR_noise = kde_CNR.resample(size=None)[source]
+
+plt.figure()
+plt.hist(noisy_CNR,bins=100)
+
+###########################
+
+
+ind_scan = (df.scan > 9000) & (df.scan < 12000)
+ind_filtered = np.isnan(dfcopy.ws.loc[ind_scan].values)
+ind_non_filtered = ~np.isnan(dfcopy.ws.loc[ind_scan].values)
+
+filtered_CNR = df.CNR.loc[ind_scan].values[ind_filtered]
+non_filtered_CNR = df.CNR.loc[ind_scan].values[ind_non_filtered]
+
+ind_CNR = filtered_CNR<-24#~((filtered_CNR>-5) & (filtered_CNR<-30))
+
+filtered_ws = df.ws.loc[ind_scan].values[ind_filtered]
+non_filtered_ws = df.ws.loc[ind_scan].values[ind_non_filtered]
+
+filtered_dvdr = dfcopy.loc[ind_scan].dvdr.values[ind_filtered]
+non_filtered_dvdr = dfcopy.loc[ind_scan].dvdr.values[ind_non_filtered]
+
+plt.figure()
+plt.hist(filtered_ws[ind_CNR],bins=30)
+plt.figure()
+plt.hist(filtered_CNR[ind_CNR],bins=30)
+plt.figure()
+plt.hist(np.abs(filtered_dvdr[ind_CNR]),bins=30)
+
+plt.figure()
+plt.hist(non_filtered_ws[ind_CNR],bins=30)
+plt.figure()
+plt.hist(non_filtered_CNR[ind_CNR],bins=30)
+plt.figure()
+plt.hist(np.abs(non_filtered_dvdr),bins=30)
+
+plt.figure()
+plt.scatter(np.abs(filtered_dvdr[ind_CNR]),filtered_CNR[ind_CNR])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

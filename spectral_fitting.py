@@ -16,7 +16,7 @@ from os import listdir
 import sys
 import tkinter as tkint
 import tkinter.filedialog
-import spectralfitting.spectralfitting
+import spectralfitting.spectralfitting as sf
 
 
 # In[Data loading]

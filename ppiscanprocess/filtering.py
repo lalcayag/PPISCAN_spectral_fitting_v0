@@ -23,15 +23,15 @@ import pandas as pd
 import numpy as np
 import scipy as sp
 
-from sklearn.grid_search import GridSearchCV
-from sklearn.neighbors import KernelDensity
 from sklearn.neighbors import KDTree
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.preprocessing import RobustScaler
 from sklearn.cluster import DBSCAN
 from scipy.interpolate import UnivariateSpline
-from scipy.spatial import Delaunay
 from scipy.signal import find_peaks
+import mpl_toolkits.mplot3d as mp3d
+from mpl_toolkits.mplot3d import Axes3D
+
 
 # In[############# [Functions] #################]
 
@@ -42,7 +42,7 @@ def runningmedian(x,N):
     b = [row[row>0] for row in x[idx]]
     return np.array([np.median(c) for c in b])
 
-def df_ws_grad(df):
+def df_ws_grad(df,grad=None):
     """
     Function that calculates the average difference in V_LOS between a
     particular point and its neighbours. V_LOS difference in the same point along ssuccesive
@@ -73,14 +73,17 @@ def df_ws_grad(df):
     #V_LOS difference backward in azimuth
     dvdr4 = df.ws.diff(axis=0,periods=-1)
     dvdr4.loc[df.azim==phi[-1]] = np.nan
-    # Average over diferences
+    # Median over diferences
     dvdr = pd.concat([dvdr1, dvdr2, dvdr3, dvdr4]).groupby(level=0).median() 
     dvdr.columns = ['dvdr']*(df['ws'].shape[1])
     # V_LOS change in time (between sucessive scans)
     dvdt = df.ws.diff(axis=0,periods=45).fillna(value=0.0)  
     dvdt.columns = ['dvdt']*(df['ws'].shape[1])
     #Additional columns
-    dv = pd.concat([dvdr,dvdt], axis=1)
+    if grad == 'dvdr':
+        dv = dvdr
+    if grad == 'dvdt':
+        dv = dvdt   
     df_prime = pd.concat([df,dv], axis=1)
     return(df_prime)
 
@@ -144,7 +147,7 @@ def filt_CNR(df,value=[-27.0,-8.0]):
 
 # In[Median-like filter]
 
-def data_filt_median(df,feature='ws',lim_m=6,lim_g=15,n=10):
+def data_filt_median(df,feature='ws',lim_m=6,lim_t = 10, lim_g = 100, n=10, m = 10, t = 10):
     """
     Filter based on 2-level thresholds for the difference in V_LOS and the moving V_LOS median
     (1st-level filter, acting in both, line-of-sight and azimuth components), and a global V_LOS 
@@ -177,12 +180,20 @@ def data_filt_median(df,feature='ws',lim_m=6,lim_g=15,n=10):
     gm = df_prime[feature].sub(df[feature].median(axis=1),axis=0)
     # filter in azimuth component
     # Local or moving median estimation
-    mmp = df_prime.groupby('scan')[feature].rolling(10,axis=0,min_periods=1).median().reset_index(
+    mmp = df_prime.groupby('scan')[feature].rolling(m,axis=0,min_periods=1).median().reset_index(
             level='scan')[feature]
+    
+    # filter in time
+    # Local or moving median estimation
+    #df_dvdt = df_ws_grad(df_prime, grad = 'dvdt').abs()    
+    #mmt = df_dvdt.groupby('azim')['dvdt'].rolling(t,center=True,axis=0).median().reset_index(level=('azim'))['dvdt']
+    #mmt_std = df_dvdt.groupby('azim')['dvdt'].rolling(t,center=True,axis=0).std().reset_index(level=('azim'))['dvdt'] 
+    
     # Substraction of V_LOS moving and global median from original DataFrame
     mmp = df_prime[feature].sub(mmp)
-    mmr = df_prime[feature].sub(mmr)
-    gm = df_prime[feature].sub(gm)  
+    mmr = df_prime[feature].sub(mmr)  
+    #mmt = df_dvdt['dvdt'].sub(mmt.add(3*mmt_std))
+  
     # Masking according to threshold values
     mask = []
     mask = (mmr.abs()>lim_m) | (gm.abs()>lim_g) | (mmp.abs()>lim_m)   
@@ -192,7 +203,7 @@ def data_filt_median(df,feature='ws',lim_m=6,lim_g=15,n=10):
 
 # In[Clustering Filter with DBSCAN algorithm]
     
-def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
+def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False, epsCNR=False):
     """
     Filter based on clustering algorithm Density-Based Spatial Clustering for Applications
     with Noise or DBSAN (Ester M. et al 1996). Each observation is represented as a point in a 
@@ -229,9 +240,9 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
     # Additional features
     df = df_ini.copy()
     if 'dvdr' in features:
-        df = df_ws_grad(df_ini)
+        df = df_ws_grad(df_ini, grad = 'dvdr')
     if 'dvdt' in features:
-        df = df_ws_grad(df_ini)
+        df = df_ws_grad(df_ini, grad = 'dvdt')
     if 'movmed' in features:
         df = df_mov_med(df,'ws',10) 
 
@@ -244,7 +255,7 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
     X = np.empty((sum(ind),len(features)))
     # DBSCAN input filling with data form df
     for i,f in enumerate(features):
-        if (f =='elev') | (f =='scan') : # Check elev or azim!!
+        if ((f =='elev') | (f =='scan')) | (f =='azim') : # Check elev or azim!! Make it general!!!!
             X[:,i] = np.array([list(df[f].values),]*b).transpose().flatten()[ind]
         else:
             X[:,i] = df[f].values.flatten()[ind]
@@ -256,6 +267,8 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
     d,i = tree_X.query(tree_X.data,k = nn)  
     #k-nearest distance
     d=d[:,-1]
+    #non-zero values
+    d = d[d>0]
     # log transformation to level-up values and easier identification of "knees"
     # d is an array with k-distances sorted in increasing value.
     d = np.log(np.sort(d))
@@ -263,7 +276,7 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
     l = np.arange(0,len(d))  
     # Down sampling to speed up calculations
     d_resample = np.array(d[::int(len(d)/400)])
-    print(len(d_resample))
+    #print(len(d_resample))
     # same with point lables
     l_resample = l[::int(len(d)/400)]
     # Cubic spline of resampled k-distances, lower memory usage and higher calculation speed.
@@ -278,6 +291,8 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
     y_1prime = fy.derivative(1)(t)
     y_2prime = fy.derivative(2)(t) 
     kappa = (x_1prime* y_2prime - y_1prime* x_2prime) / np.power(x_1prime**2 + y_1prime**2, 1.5)
+#    print(np.min(d),np.max(d),(-d_resample[0]+d_resample[-1]))
+#    ##
 #    fig, ax1 = plt.subplots()
 #    ax1.plot(l_resample,kappa)
 #    plt.grid()
@@ -308,10 +323,13 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
     # eps(x) linear relation
     eps = m*x+c   
     eps1 = eps0
-    # if reliable data is less than 45% then jusat the noise level criteria eps(x) is used
+    # if reliable data is less than 30% then just the noise level criteria eps(x) is used
     #(it is indeed more strict)
-    if x<.45:
+    if x<.3:
         eps1=eps
+    # If not CNR criteria is used    
+    if ~epsCNR:
+        eps = eps0
     # DBSCAN object creation, the eps parameter is chosen as the average between the value
     # estimated with the noise-knee criteria, eps0 and the noise-level criteria, eps.
     clf = []
@@ -328,15 +346,20 @@ def data_filt_DBSCAN(df_ini,features,nn=5,eps=0.3,CNR_n=-24, plot=False):
     #       - k-distance plot with eps value using both criterias, and the average value.
     #       - Scatter plot in 3 dimensions (more features are not shown)  
     if plot:        
-        plt.figure()
-        plt.plot(d)
-        plt.plot([0,X.shape[0]],[np.log(eps),np.log(eps)])
-        plt.plot([0,X.shape[0]],[np.log(eps0),np.log(eps0)])
-        plt.plot([0,X.shape[0]],[np.log(.5*(eps+eps0)),np.log(.5*(eps+eps0))])
-        plt.xlabel('Data point', fontsize=12, weight='bold')
-        plt.ylabel('k-nearest distance [-]', fontsize=12, weight='bold')
-        plt.grid()
-        plt.legend(['k-dist.','Noise level','Knee','Average'])
+        fig, ax = plt.subplots()
+        ax.plot(d,label = '$Data$', c = 'k')
+        ax.plot([0,X.shape[0]],[np.log(eps),np.log(eps)],'--', c = 'red', label = r'$\log(\varepsilon_{CNR})$')
+        ax.plot([0,X.shape[0]],[np.log(eps0),np.log(eps0)],'--', c = 'blue', label = r'$\log(\varepsilon_{knee})$')
+        ax.plot([0,X.shape[0]],[np.log(.5*(eps+eps0)),np.log(.5*(eps+eps0))], c = 'grey', label = r'$\log(.5(\varepsilon_{CNR}+\varepsilon_{knee}))$')
+        ax.set_xlabel('$Data\:point$', fontsize=16, weight='bold')
+        ax.set_ylabel('$log(k-dist)$', fontsize=16, weight='bold')
+        ax.set_xlim([-X.shape[0]*.03,X.shape[0]*1.03])
+        ax.legend(loc=(.15,.6),fontsize=16)
+        ax.text(0.05, 0.95, '(a)', transform=ax.transAxes, fontsize=24,
+        verticalalignment='top')
+        ax.tick_params(labelsize = 16)
+        fig.tight_layout()
+
         for i,f in enumerate(features):
             if (f =='azim') | (f =='scan') :
                 X[:,i] = np.array([list(df[f].values),]*b).transpose().flatten()[ind]
