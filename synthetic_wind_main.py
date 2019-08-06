@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 Created on Thu May 16 20:15:37 2019
-
+# In[]
+####################################################################################################################################
+## Comment:
+This is the main code that uses a bunch of functions, I recommend we check dependencies 
+and then you can clone the necessary directories from github.
+####################################################################################################################################  
 @author: lalc
 """
 import numpy as np
@@ -170,6 +175,10 @@ with open('sim.pkl', 'wb') as sim:
      pickle.dump((no_sym,sym),sim)
 
 # In[Auto and cross-correlation]
+####################################################################################################################################
+## Comment for Konstantinos: Autocorrelation, very slow, but works with any geometry
+####################################################################################################################################    
+
 onlyfiles = [f for f in listdir(file_in_path) if isfile(join(file_in_path, f))]  
 x = grid_new[0][0,:]
 y = grid_new[1][:,0]  
@@ -218,6 +227,10 @@ with open('simr.pkl', 'wb') as sim:
      pickle.dump(symr,sim)
 # In[Spectra from autocorrelation and fft]
 # interpolation two binary grid
+####################################################################################################################################
+## Comment for Konstantinos: Spectra from autocorrelation, if you have it
+####################################################################################################################################    
+
 x_max = np.max(np.r_[(r_0_t*np.cos(phi_0_t)).flatten(),(r_1_t*np.cos(phi_1_t)).flatten()])
 x_min = np.min(np.r_[(r_0_t*np.cos(phi_0_t)).flatten(),(r_1_t*np.cos(phi_1_t)).flatten()])
 
@@ -280,6 +293,10 @@ for dir_mean in Dir:
 
              
 # In[Transfer function]
+####################################################################################################################################
+## Comment for Konstantinos: Here the Filter (or transfer function in the frequency space) is estimated in one dimension
+####################################################################################################################################    
+
 ae = [0.025, 0.05, 0.075]
 L = [62,62.5,125,250,500,750,1000]
 G = [0,1,2,2.5,3.5]
@@ -347,6 +364,9 @@ with open('H.pkl', 'rb') as V_t:
      k_H,H,sym = pickle.load(V_t)            
 
 # In[]
+####################################################################################################################################
+## Comment for Konstantinos: This is the spectra form the Fourier transform applied to the velcity field.
+####################################################################################################################################    
 
 k_H_s = []
 H_s = []
@@ -391,7 +411,11 @@ for dir_mean in Dir:
 
 with open('H_s.pkl', 'rb') as V_t:
      k_H_s,H_s,sym_s = pickle.load(V_t)      
-# In[]     
+# In[]  
+####################################################################################################################################
+## Comment for Konstantinos: This is just a bunch of figures, not necessary you use them in your project
+####################################################################################################################################    
+
 lengths = [len(hi) for hi in k_H]
 
 colors = ['b','r','g','k'] # directions

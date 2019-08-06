@@ -140,7 +140,7 @@ def dir_rec_rapid(V_a,V_b,a,b,shape):
 
 # In[Numerical lidar] 
 ####################################################################################################################################    
-## Comment for Jennifer: This is the one I ended up using, the weighting function from early weights is the one from Alexander's paper
+## Comment for Konstantinos: This is the one I ended up using, the weighting function from early weights is the one from Alexander Meyer's paper
 ####################################################################################################################################    
 def num_pulsed_lidar(U_in,V_in,vtx,wts,w,c_ref, s_ref, shapes):
     # Translate (x,y) field to lidar origin and transform to polar coordinates
@@ -189,7 +189,7 @@ def num_lidar_rot_del(U_in,V_in,vtx,wts,w,c_ref, s_ref, shapes):
 
 # In[Interpolation for rotated wind fields]
 ####################################################################################################################################
-## Comment for Jennifer: This is the one I ended up using, the weighting function from early weights is the one from Alexander's paper
+## Comment for Konstantinos: This is the one I ended up using, the weighting function from early weights is the one from Alexander's paper
 ####################################################################################################################################    
 def interpolate(values, vtx, wts, fill_value=np.nan):
     ret = np.einsum('nj,nj->n', np.take(values, vtx), wts)
@@ -205,7 +205,7 @@ def interp_weights2(uv, tri, d = 2):
     bary = np.einsum('njk,nk->nj', temp[:, :d, :], delta)
     return vertices, np.hstack((bary, 1 - bary.sum(axis=1, keepdims=True)))
 ####################################################################################################################################
-## Comment for Jennifer: This is the one I ended up using, the weighting function from early weights is the one from Alexander's paper
+## Comment for Konstantinos: This is the one I ended up using, the weighting function from early weights is the one from Alexander's paper
 ####################################################################################################################################
 def early_weights_pulsed(r, phi, dl, dir_mean , tri, d, center, n=21, m=51):
     gamma = (2*np.pi-dir_mean) 
@@ -249,6 +249,7 @@ def early_weights_pulsed(r, phi, dl, dir_mean , tri, d, center, n=21, m=51):
     shapes = np.array([phi_t_refine.shape[0], phi_t_refine.shape[1], n, m])        
     return (vtx, wts, w, c_ref, s_ref, shapes)
 ####################################################################################################################################
+## Comment for Konstantinos: This early weights was used for a different tasks and it is not realistic
 ####################################################################################################################################
 def early_weights_kernel(r, phi, dir_mean , tri, d, center, n=21, m=51):
     gamma = (2*np.pi-dir_mean) 
@@ -291,10 +292,8 @@ def early_weights_kernel(r, phi, dir_mean , tri, d, center, n=21, m=51):
 
 
 ##################
-    
-
 # In[Geometry generation]
-# input for numerical lidar    
+# input for numerical lidar
 def geom_polar_grid(rmin,rmax,nr,phimin,phimax,nphi,d):
     r = np.linspace(rmin,rmax,nr)
     phi = np.linspace(phimin,phimax,nphi)*np.pi/180  
@@ -344,12 +343,13 @@ def win_field_mask_tri(dir_mean,xtrans, ytrans, tri, grid):
     Xx = np.dot(T,Xx)
     tri_rot = Delaunay(Xx.T[:,:2], qhull_options = "QJ")               
     mask_rot = tri_rot.find_simplex(np.c_[grid[0].flatten(),grid[1].flatten()])==-1                
-    return np.reshape(mask_rot,grid[0].shape)    
-
-              
+    return np.reshape(mask_rot,grid[0].shape)                
    
 # In[Noise generation]
 # Perlin Noise
+####################################################################################################################################
+## Comment for Konstantinos: This is not used in your project
+####################################################################################################################################    
 def perlin_noise(x,y,scale=30, azim_frac = .3, rad_lim = .1, dr_max = .3, period = 256, tot= False):
     
     n, m = x.shape   
